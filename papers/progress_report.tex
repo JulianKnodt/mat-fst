@@ -1,0 +1,45 @@
+\documentclass[12pt]{report}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{hyperref}
+
+\lstset{
+language=C,
+basicstyle=\small\sffamily,
+numbers=left,
+numberstyle=\tiny,
+frame=tb,
+columns=fullflexible,
+showstringspaces=false
+}
+
+\setlength{\parindent}{0cm}
+\setlength{\parskip}{\baselineskip}
+\begin{document}
+
+\section*{Project Progress Report}
+\author*{Julian Knodt} \\
+\today \\
+Systems \& ML
+
+Updates on the project are as follows:
+I switched from audio compression to working on efficient sparse matrix representations. In
+doing so, I decided to look mainly at efficient compression algorithms. Initially, I was curious
+how tries might work for efficiently representing matrices.
+
+This lead me to the conception that matrices can be treated like ordered maps, where the list of
+indeces is the "string" key and the corresponding output value is the associated value. Finite
+state transducers(FST), as opposed to tries, also compress suffixes of keys, so I plan on
+implementing a sparse matrix with the underlying structure being a FST. I'm basing my work on a
+finite state transducer \href{https://github.com/BurntSushi/fst/tree/master/src}{library} and
+then planning on building a wrapper on top that supports the creation of matrices from other
+static formats, adding scalars, and vector multiplication to start.
+
+I've currently looked through the existing library, and extended it to support floating point
+associated values. I further need to modify the query library to support matrix like indexing,
+as well as storing the shape of a matrix. I think now that I have a fundamental understanding of
+the library, the rest should not take too long.
+
+
+\end{document}
