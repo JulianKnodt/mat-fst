@@ -139,12 +139,16 @@ where
       },
       State::OneTrans(s) => {
         assert_eq!(i, 0);
-        (s.input(self), s.output::<I, O>(self), s.trans_addr::<I, O>(self))
+        (
+          s.input(self),
+          s.output::<I, O>(self),
+          s.trans_addr::<I, O>(self),
+        )
       },
       State::AnyTrans(s) => (
         s.input(self, i),
         s.output::<I, O>(self, i),
-        s.trans_addr(self, i),
+        s.trans_addr::<I, O>(self, i),
       ),
     };
     Transition {
@@ -362,14 +366,10 @@ impl StateAnyTrans {
       }
     }
     for t in node.transitions.iter().rev() {
-      // TODO make this packed
-      assert_eq!(
-        tbytes,
-        Bytes(PackTo(delta(addr, t.addr), tbytes)).write_le(&mut wtr)?
-      );
+      let t_written = Bytes(PackTo(delta(addr, t.addr), tbytes)).write_le(&mut wtr)?;
+      assert_eq!(t_written, tbytes);
     }
     for t in node.transitions.iter().rev() {
-      // TODO make this packed
       Bytes(t.input).write_le(&mut wtr)?;
     }
     Bytes(iosize.encode()).write_le(&mut wtr)?;
@@ -401,7 +401,7 @@ impl StateAnyTrans {
     let n = self.0 & !0b11_000000;
     Some(n).filter(|&n| n != 0).map(|n| n - 1)
   }
-  // the total size of all the transitions for the given sizs
+  // the total size of all the transitions for the given sizes
   fn total_trans_bytes<I: Input>(self, sizes: IOSize, n: usize) -> usize {
     // If I choose to add an index to self I need to add that in here
     // the n addition at the start is the size of the input bytes (1 per transition currently)
@@ -442,7 +442,7 @@ impl StateAnyTrans {
       - self.num_trans_len()
       - 1
       - self.total_trans_bytes::<I>(sizes, num_trans)
-      - (num_trans * (osize + 1));
+      - ((num_trans + 1) * osize);
     Bytes::<O>::read_le(&mut &data[at..], osize as u8)
       .unwrap()
       .inner()
@@ -458,7 +458,7 @@ impl StateAnyTrans {
       - (osize * num_trans)
       - final_osize
   }
-  fn trans_addr<O>(self, node: &Node<'_, O>, i: usize) -> CompiledAddr {
+  fn trans_addr<I: Input, O>(self, node: &Node<'_, O>, i: usize) -> CompiledAddr {
     assert!(i < node.num_trans);
     let tsize = node.sizes.transition_bytes();
     if tsize == 0 {
@@ -467,9 +467,8 @@ impl StateAnyTrans {
     let at = node.start
       - self.num_trans_len()
       - 1 // iosize
-      - node.num_trans // inputs
-      - (i * tsize)
-      - tsize;
+      - node.num_trans * self.input_len::<I>() // inputs
+      - ((i+1) * tsize);
     let delta = Bytes::<u64>::read_le(&mut &node.data[at..], tsize as u8)
       .unwrap()
       .inner();
@@ -495,25 +494,16 @@ impl StateAnyTrans {
   fn find_input<O, I: Input>(self, node: &Node<'_, O>, b: I) -> Option<usize>
   where
     Bytes<I>: Deserialize, {
-    let start = node.start - self.num_trans_len() - 1 - node.num_trans;
-    let end = start + node.num_trans;
-    // Iterate from left to right then flip number
     let input_len = self.input_len::<I>();
-    for (i, x) in (start..end).step_by(input_len).enumerate() {
-      let v = Bytes::read_le(&mut &node.data[x..], input_len as u8)
-        .unwrap()
-        .inner();
-      if v == b {
-        return Some(node.num_trans - i - 1);
-      }
-    }
-    None
-    /*
+    let start = node.start - self.num_trans_len() - 1 - node.num_trans * input_len;
+    let end = start + node.num_trans * input_len;
+    // Iterate from left to right then flip number
+    debug_assert_eq!((end - start) % input_len, 0);
     node.data[start..end]
-      .iter()
-      .position(|&input| input == b)
+      .chunks_exact(input_len)
+      .map(|mut chunk| Bytes::read_le(&mut chunk, input_len as u8).unwrap().inner())
+      .position(|i| i == b)
       .map(|i| node.num_trans - i - 1)
-    */
   }
 }
 

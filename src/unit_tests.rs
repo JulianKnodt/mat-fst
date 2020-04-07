@@ -93,6 +93,25 @@ fn many_f32() {
   }
 }
 #[test]
+fn many_u16_u64() {
+  let mut builder = Builder::memory().unwrap();
+  for i in 0u16..=20 {
+    for j in 0..=20 {
+      for k in 0..=20 {
+        assert!(builder.insert([i, j, k], i + j + k).is_ok());
+      }
+    }
+  }
+  let fst = builder.into_fst();
+  for i in 0u16..=20 {
+    for j in 0..=20 {
+      for k in 0..=20 {
+        assert_eq!(fst.get(&[i, j, k]), Some(i + j + k));
+      }
+    }
+  }
+}
+#[test]
 fn iter() {
   use crate::output::FiniteFloat;
   let mut builder = Builder::memory().unwrap();
