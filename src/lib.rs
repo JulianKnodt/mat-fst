@@ -1,4 +1,4 @@
-#![feature(const_generics, const_generic_impls_guard, const_fn)]
+#![feature(const_generics, const_generic_impls_guard, const_fn, is_sorted)]
 #![allow(incomplete_features, unused)]
 
 extern crate num;
@@ -8,15 +8,20 @@ mod bytes;
 mod counting_writer;
 mod error;
 mod fst;
-mod iter;
+pub mod iter;
 mod node;
+#[cfg(feature = "parallel")]
+pub mod par_iter;
 
 // Fst generalization traits
-mod input;
-mod output;
+pub mod input;
+pub mod output;
 
 // matrix related stuff
 pub mod matrix;
+
+// utilities for sparsity
+pub mod util;
 
 #[cfg(test)]
 #[macro_use]

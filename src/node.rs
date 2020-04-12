@@ -24,7 +24,7 @@ where
     last_addr: CompiledAddr,
     addr: CompiledAddr,
   ) -> io::Result<()> {
-    assert!(self.transitions.len() <= std::u8::MAX as usize + 1);
+    assert!(self.transitions.len() <= I::max_value().as_usize());
     if self.transitions.is_empty() && self.is_final && self.final_output.is_zero() {
       Ok(())
     } else if self.transitions.len() != 1 || self.is_final {
@@ -48,9 +48,11 @@ pub struct Node<'a, O> {
   pub(crate) state: State,
   start: CompiledAddr,
   end: CompiledAddr,
+  // TODO trim this is final
   pub(crate) is_final: bool,
   pub(crate) num_trans: usize,
   sizes: IOSize,
+  // TODO trim this final output
   pub(crate) final_output: O,
 }
 
@@ -58,7 +60,9 @@ impl<'f, O: Output> Node<'f, O>
 where
   Bytes<O>: Deserialize,
 {
-  pub fn new<I: Input>(addr: CompiledAddr, data: &[u8]) -> Node<'_, O> {
+  pub fn new<I: Input>(addr: CompiledAddr, data: &[u8]) -> Node<'_, O>
+  where
+    Bytes<I>: Deserialize, {
     let state = State::new(data, addr);
     match state {
       State::EmptyFinal => Self::empty_final(),
@@ -91,8 +95,8 @@ where
       },
       State::AnyTrans(s) => {
         let data = &data[..addr + 1];
-        let sizes = s.sizes(data);
-        let num_trans = s.num_trans(data);
+        let sizes = s.sizes::<I>(data);
+        let num_trans = s.num_trans::<I>(data);
         Node {
           data,
           state,
@@ -118,14 +122,6 @@ where
       final_output: O::zero(),
     }
   }
-  /*
-  pub fn transitions<'n>(&'n self) -> Transitions<'n, 'f, O> {
-    Transitions {
-      node: self,
-      range: 0..self.num_trans,
-    }
-  }
-  */
   /// Gets the ith transition for this node
   pub(crate) fn transition<I: Input>(&self, i: usize) -> Transition<I, O>
   where
@@ -171,6 +167,22 @@ where
       State::OneTrans(_) => None,
 
       State::AnyTrans(s) => s.find_input(self, b),
+    }
+  }
+  /// Returns the range of inputs from start to end inclusive.
+  pub(crate) fn find_input_range<I: Input>(&self, range: &Range<I>) -> Range<usize>
+  where
+    Bytes<I>: Deserialize, {
+    match self.state {
+      State::EmptyFinal => 0..0,
+
+      State::OneTransNext(s) if range.contains(&s.input::<I, O>(self)) => 0..1,
+      State::OneTransNext(_) => 0..0,
+
+      State::OneTrans(s) if range.contains(&s.input::<I, O>(self)) => 0..1,
+      State::OneTrans(_) => 0..0,
+
+      State::AnyTrans(s) => s.find_input_range(self, range),
     }
   }
 }
@@ -354,7 +366,7 @@ impl StateAnyTrans {
     if node.is_final {
       state.set_final();
     }
-    state.set_state_num_trans(node.transitions.len() as u8);
+    state.set_state_num_trans(node.transitions.len());
     if any_outs {
       if node.is_final {
         // TODO make this packed
@@ -374,29 +386,35 @@ impl StateAnyTrans {
     }
     Bytes(iosize.encode()).write_le(&mut wtr)?;
     if state.state_num_trans().is_none() {
-      assert_ne!(node.transitions.len(), 0);
-      let s = (node.transitions.len() - 1) as u8;
+      assert_ne!(node.transitions.len(), 0, "UNREACHABLE 0 encoded in state");
+      let s = I::from_usize(node.transitions.len() - 1);
       Bytes(s).write_le(&mut wtr)?;
+      assert_ne!(state.num_trans_len::<I>(), 0);
+    } else {
+      assert_eq!(state.num_trans_len::<I>(), 0);
     }
     Bytes(state.0).write_le(&mut wtr)?;
     Ok(())
   }
   fn set_final(&mut self) { self.0 |= 0b01_000000; }
   const fn is_final(self) -> bool { self.0 & 0b01_000000 != 0 }
-  fn sizes(self, data: &[u8]) -> IOSize {
-    let i = data.len() - 1 - self.num_trans_len() - 1;
+  fn sizes<I: Input>(self, data: &[u8]) -> IOSize {
+    let i = data.len() - 1 - self.num_trans_len::<I>() - 1;
     IOSize::decode(data[i])
   }
   /// Attempts to encode number of transitions in the state
   // TODO return if successful or not
-  fn set_state_num_trans(&mut self, n: u8) {
-    let n = n.saturating_add(1);
+  fn set_state_num_trans(&mut self, n: usize) {
+    if n >= 256 {
+      return;
+    }
+    let n = (n as u8).saturating_add(1);
     if n <= !0b11_000000 {
       self.0 = (self.0 & 0b11_000000) | n;
     }
   }
   /// Number of transitions encoded into the state
-  /// If it is 0 it implies there there is a byte used to encode transitions elsewhere
+  /// If it is 0 it implies that the number of transitions is encoded elsewhere
   fn state_num_trans(self) -> Option<u8> {
     let n = self.0 & !0b11_000000;
     Some(n).filter(|&n| n != 0).map(|n| n - 1)
@@ -408,13 +426,26 @@ impl StateAnyTrans {
     (n * self.input_len::<I>()) + (n * sizes.transition_bytes())
   }
   // returns whether or not the ntrans byte exists
-  fn num_trans_len(self) -> usize { self.state_num_trans().is_none() as usize }
+  fn num_trans_len<I: Input>(self) -> usize {
+    if self.state_num_trans().is_none() {
+      self.input_len::<I>()
+    } else {
+      0
+    }
+  }
   // returns the number of transitions for a given amt of data
-  fn num_trans(self, data: &[u8]) -> usize {
+  fn num_trans<I: Input>(self, data: &[u8]) -> usize
+  where
+    Bytes<I>: Deserialize, {
     if let Some(n) = self.state_num_trans() {
       return n as usize;
     }
-    (data[data.len() - 2] + 1) as usize
+    let input_len = self.input_len::<I>();
+    Bytes::<I>::read_le(&mut &data[data.len() - 1 - input_len..], input_len as u8)
+      .unwrap()
+      .inner()
+      .as_usize()
+      + 1
   }
   const fn input_len<I: Input>(self) -> usize { size_of::<I>() }
   fn input<I: Input, O>(self, node: &Node<'_, O>, i: usize) -> I
@@ -422,7 +453,7 @@ impl StateAnyTrans {
     Bytes<I>: Deserialize, {
     let input_len = self.input_len::<I>();
     let at = node.start
-      - self.num_trans_len()
+      - self.num_trans_len::<I>()
       - 1 // IOSize
       // TODO if add index need to add it in here as well
       - (i+1) * input_len;
@@ -439,7 +470,7 @@ impl StateAnyTrans {
     }
     let at = data.len()
       - 1
-      - self.num_trans_len()
+      - self.num_trans_len::<I>()
       - 1
       - self.total_trans_bytes::<I>(sizes, num_trans)
       - ((num_trans + 1) * osize);
@@ -452,7 +483,7 @@ impl StateAnyTrans {
     let final_osize = if self.is_final() { osize } else { 0 };
     data.len()
       - 1
-      - self.num_trans_len()
+      - self.num_trans_len::<I>()
       - 1 // IOSize
       - self.total_trans_bytes::<I>(sizes, num_trans)
       - (osize * num_trans)
@@ -465,7 +496,7 @@ impl StateAnyTrans {
       return END_ADDRESS;
     };
     let at = node.start
-      - self.num_trans_len()
+      - self.num_trans_len::<I>()
       - 1 // iosize
       - node.num_trans * self.input_len::<I>() // inputs
       - ((i+1) * tsize);
@@ -474,7 +505,6 @@ impl StateAnyTrans {
       .inner();
     undo_delta(node.end, delta)
   }
-
   fn output<I: Input, O: Output>(self, node: &Node<'_, O>, i: usize) -> O
   where
     Bytes<O>: Deserialize, {
@@ -483,7 +513,7 @@ impl StateAnyTrans {
       return O::zero();
     };
     let at = node.start
-      - self.num_trans_len()
+      - self.num_trans_len::<I>()
       - 1 // iosize
       - self.total_trans_bytes::<I>(node.sizes, node.num_trans)
       - ((i+1) * osize);
@@ -495,8 +525,8 @@ impl StateAnyTrans {
   where
     Bytes<I>: Deserialize, {
     let input_len = self.input_len::<I>();
-    let start = node.start - self.num_trans_len() - 1 - node.num_trans * input_len;
-    let end = start + node.num_trans * input_len;
+    let end = node.start - self.num_trans_len::<I>() - 1;
+    let start = end - node.num_trans * input_len;
     // Iterate from left to right then flip number
     debug_assert_eq!((end - start) % input_len, 0);
     node.data[start..end]
@@ -504,6 +534,30 @@ impl StateAnyTrans {
       .map(|mut chunk| Bytes::read_le(&mut chunk, input_len as u8).unwrap().inner())
       .position(|i| i == b)
       .map(|i| node.num_trans - i - 1)
+  }
+  fn find_input_range<O, I: Input>(self, node: &Node<'_, O>, r: &Range<I>) -> Range<usize>
+  where
+    Bytes<I>: Deserialize, {
+    let input_len = self.input_len::<I>();
+    let end = node.start - self.num_trans_len::<I>() - 1;
+    let start = end - node.num_trans * input_len;
+    let mut iter = node.data[start..end]
+      .chunks_exact(input_len)
+      .map(|mut chunk| Bytes::read_le(&mut chunk, input_len as u8).unwrap().inner());
+    // going from greatest to least
+    let end = iter
+      .position(|i| r.end <= i)
+      .map(|i| node.num_trans - i - 1);
+    let end = if let Some(v) = end { v } else { return 0..0 };
+    let start = iter
+      .position(|i| r.start >= i)
+      .map(|i| node.num_trans - i - 1);
+    let start = if let Some(v) = start {
+      v
+    } else {
+      return 0..end;
+    };
+    start..end
   }
 }
 
@@ -518,20 +572,6 @@ impl IOSize {
   const TRANS_MASK: u8 = 0b1111_0000;
   const OUT_MASK: u8 = 0b000_1111;
   const fn new() -> Self { Self(0) }
-  /*
-  // TODO use this when encoding input size
-  fn of(input: u8, output: u8, trans: u8) -> Self {
-    assert!(input <= 2);
-    assert!(output <= 8);
-    assert!(trans <= 8);
-    input * 9 * 9 + output * 9 + trans
-  }
-  fn sizes(&self) -> (usize, usize, usize) {
-    let trans = self.0 % 9;
-    let output = (self.0/9) % 9;
-    let input = (self.0/81) % 3;
-  }
-  */
   fn set_transition_bytes(&mut self, size: u8) {
     assert!(size <= 8, "Cannot encode transition larger than 8 bytes");
     self.0 = (self.0 & !IOSize::TRANS_MASK) | (size << 4);
@@ -587,22 +627,3 @@ fn undo_delta(node_addr: CompiledAddr, delta: u64) -> CompiledAddr {
     node_addr - delta
   }
 }
-
-/*
-#[derive(Debug)]
-pub struct Transitions<'n, 'i, O> {
-  node: &'n Node<'i, O>,
-  // TODO could possibly reduce the size of this by making this not be usize
-  range: Range<usize>,
-}
-
-impl<'n, 'i, O> Iterator for Transitions<'n, 'i, O>
-where
-  Bytes<O>: Deserialize,
-  O: Output,
-{
-  type Item = Transition<u8, O>;
-  #[inline]
-  fn next(&mut self) -> Option<Self::Item> { self.range.next().map(|i| self.node.transition(i)) }
-}
-*/

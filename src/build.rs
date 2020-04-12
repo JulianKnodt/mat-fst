@@ -173,7 +173,16 @@ where
   Bytes<O>: Serialize,
 {
   pub fn memory() -> Result<Self, I> { Builder::new(Vec::with_capacity(10240)) }
-  pub fn into_fst(self) -> Fst<Vec<u8>, I, O> { self.into_inner().and_then(Fst::new).unwrap() }
+  pub fn into_fst(self) -> Fst<Vec<u8>, I, O> {
+    self
+      .into_inner()
+      .map(|mut v| {
+        v.shrink_to_fit();
+        v
+      })
+      .and_then(Fst::new)
+      .unwrap()
+  }
 }
 
 impl<W: Write, I: Input, O: Output> Builder<W, I, O>
@@ -215,6 +224,7 @@ where
     } else {
       self.last = Some(key.to_vec());
     }
+    self.len += 1;
     Ok(())
   }
   fn insert_output(&mut self, key: &[I], val: O) -> Result<(), I> {
@@ -227,7 +237,6 @@ where
       assert!(out.is_zero());
       return Ok(());
     }
-    self.len += 1;
     self.compile_from(prefix_len)?;
     self.unfinished.add_suffix(&key[prefix_len..], out);
     Ok(())

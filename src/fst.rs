@@ -55,7 +55,6 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
     let mut node = self.root();
     let mut out = O::zero();
     for &b in key {
-      println!("{} {:?}", b, node.state);
       node = node.find_input(b).map(|i| {
         let t = node.transition::<I>(i);
         out = out.cat(&t.output);
@@ -88,16 +87,19 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
   }
   pub(crate) fn root(&self) -> Node<'_, O>
   where
-    Bytes<O>: Deserialize, {
+    Bytes<O>: Deserialize,
+    Bytes<I>: Deserialize, {
     self.node(self.meta.root_addr)
   }
   pub(crate) fn node(&self, addr: CompiledAddr) -> Node<'_, O>
   where
-    Bytes<O>: Deserialize, {
+    Bytes<O>: Deserialize,
+    Bytes<I>: Deserialize, {
     Node::new::<I>(addr, &self.data.as_ref())
   }
   pub fn len(&self) -> usize { self.meta.len }
   pub fn is_empty(&self) -> bool { self.len() == 0 }
+  pub(crate) fn nbytes(&self) -> usize { self.data.as_ref().len() }
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

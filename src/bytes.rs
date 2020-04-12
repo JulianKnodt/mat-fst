@@ -194,14 +194,14 @@ mod bytes_test {
     fn pack_serdes_u32(v: u32) -> bool {
       let mut buffer = vec![];
       let written = Bytes(Pack(v)).write_le(&mut buffer).unwrap() as u8;
-      v == Bytes::read_le(&mut buffer.as_slice(), written).unwrap().inner()
+      v == Bytes::<u32>::read_le(&mut buffer.as_slice(), written).unwrap().inner()
     }
   }
   quickcheck! {
     fn pack_serdes_u64(v: u64) -> bool {
       let mut buffer = vec![];
       let written = Bytes(Pack(v)).write_le(&mut buffer).unwrap() as u8;
-      v == Bytes::read_le(&mut buffer.as_slice(), written).unwrap().inner()
+      v == Bytes::<u64>::read_le(&mut buffer.as_slice(), written).unwrap().inner()
     }
   }
   quickcheck! {

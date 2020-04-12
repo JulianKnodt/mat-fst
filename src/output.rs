@@ -1,11 +1,11 @@
 use crate::bytes::*;
 /// Defining associated output alphabets for the FST
-use num::{Float, Zero};
+use num::{Float, One, Zero};
 use std::{
   cmp,
   fmt::Debug,
   hash::{Hash, Hasher},
-  ops::{Add, Sub},
+  ops::{Add, Mul, Sub},
 };
 
 /// Prefix represents two types which can have a common prefix between them from the same type
@@ -32,9 +32,17 @@ where
   fn rm_pre(&self, o: &Self) -> Self { *self - *o }
 }
 
-impl<T: Ord + Copy> Prefix for T {
-  fn prefix(&self, o: &Self) -> Self { cmp::min(*self, *o) }
+macro_rules! default_prefix {
+  ($t: ty) => {
+    impl Prefix for $t {
+      fn prefix(&self, o: &Self) -> Self { cmp::min(*self, *o) }
+    }
+  };
 }
+default_prefix!(u8);
+default_prefix!(u16);
+default_prefix!(u32);
+default_prefix!(u64);
 
 /// A float which implements Ord and Eq for use with FST packages
 /// Assuming that the float constructed
@@ -53,11 +61,21 @@ impl<T: Zero + Float> Zero for FiniteFloat<T> {
   fn zero() -> Self { FiniteFloat(T::zero()) }
   fn is_zero(&self) -> bool { self.0.is_zero() }
 }
+impl<T: One + Float> One for FiniteFloat<T> {
+  fn one() -> Self { FiniteFloat(T::one()) }
+  fn is_one(&self) -> bool { self.0.is_one() }
+}
 
 impl<T: Float> Add for FiniteFloat<T> {
   type Output = Self;
   #[inline]
   fn add(self, o: Self) -> Self::Output { FiniteFloat(self.0 + o.0) }
+}
+
+impl<T: Float> Mul for FiniteFloat<T> {
+  type Output = Self;
+  #[inline]
+  fn mul(self, o: Self) -> Self::Output { FiniteFloat::new(self.0 * o.0) }
 }
 
 impl<T: Float> Hash for FiniteFloat<T>
@@ -80,7 +98,13 @@ impl<T: Float> FiniteFloat<T> {
   #[inline]
   pub fn inner(&self) -> T { self.0 }
 }
-
+impl<T: Float + Debug> Prefix for FiniteFloat<T> {
+  fn prefix(&self, o: &Self) -> Self {
+    // which strategy works best?
+    // FiniteFloat::new(self.0.min(o.0))
+    FiniteFloat::zero()
+  }
+}
 impl<T: Float + Debug> Output for FiniteFloat<T>
 where
   Bytes<T>: Serialize,
@@ -94,7 +118,7 @@ where
 pub struct Unit;
 impl Add for Unit {
   type Output = Self;
-  fn add(self, o: Self) -> Self::Output { Unit }
+  fn add(self, _: Self) -> Self::Output { Unit }
 }
 impl Zero for Unit {
   #[inline]
@@ -105,4 +129,7 @@ impl Zero for Unit {
 impl Output for Unit {
   fn cat(&self, o: &Self) -> Self { Unit }
   fn rm_pre(&self, o: &Self) -> Self { Unit }
+}
+impl Prefix for Unit {
+  fn prefix(&self, _: &Self) -> Self { Unit }
 }

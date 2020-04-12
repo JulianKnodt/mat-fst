@@ -1,5 +1,10 @@
-#[cfg(test)]
-use crate::{build::Builder, output::Unit};
+use crate::{
+  build::Builder,
+  matrix::Matrix,
+  output::{FiniteFloat, Unit},
+};
+use num::One;
+
 #[test]
 fn one_unit() {
   let mut builder = Builder::memory().unwrap();
@@ -69,7 +74,6 @@ fn many_u32() {
 }
 #[test]
 fn many_f32() {
-  use crate::output::FiniteFloat;
   let mut builder = Builder::memory().unwrap();
   for i in 0u8..=20 {
     for j in 0..=20 {
@@ -92,22 +96,42 @@ fn many_f32() {
     }
   }
 }
+
+#[test]
+fn f32_precision() {
+  use crate::output::FiniteFloat;
+  let mut builder = Builder::memory().unwrap();
+  let scale_down = 9999999999999999999999999f32;
+
+  for i in 1u8..=20 {
+    for j in 1..=20 {
+      let v = (i as f32 + j as f32) / scale_down;
+      assert_ne!(0.0, v);
+      assert!(builder.insert([i, j], FiniteFloat::new(v)).is_ok());
+    }
+  }
+  let eps = 0.00000001;
+  let fst = builder.into_fst();
+  for i in 1u8..=20 {
+    for j in 1..=20 {
+      let got = fst.get(&[i, j]).expect("Unexpected missing value").inner();
+      let expected = (i as f32 + j as f32) / scale_down;
+      assert!((got - expected).abs() < eps, "{}", (got - expected).abs());
+    }
+  }
+}
 #[test]
 fn many_u16_u64() {
   let mut builder = Builder::memory().unwrap();
-  for i in 0u16..=20 {
-    for j in 0..=20 {
-      for k in 0..=20 {
-        assert!(builder.insert([i, j, k], i + j + k).is_ok());
-      }
+  for i in 0u16..=300 {
+    for j in 0..=2 {
+      assert!(builder.insert([i, j], i + j).is_ok());
     }
   }
   let fst = builder.into_fst();
-  for i in 0u16..=20 {
-    for j in 0..=20 {
-      for k in 0..=20 {
-        assert_eq!(fst.get(&[i, j, k]), Some(i + j + k));
-      }
+  for i in 0u16..=300 {
+    for j in 0..=2 {
+      assert_eq!(fst.get(&[i, j]), Some(i + j));
     }
   }
 }
@@ -130,4 +154,27 @@ fn iter() {
     (0..=n).flat_map(move |j| (0..=n).map(move |k| FiniteFloat::new((i + j + k) as f32)))
   });
   assert!(fst.values().eq(expected));
+}
+
+#[test]
+fn vec_matmul() {
+  let mul = FiniteFloat::new(0.3);
+  let mat: Matrix<_, _, _, 2> = Matrix::eye(16u8);
+  let one = vec![mul; 16];
+  let out = mat.vecmul(&one[..]);
+  for i in out {
+    assert_eq!(mul, i)
+  }
+}
+
+#[test]
+#[cfg(feature = "parallel")]
+fn par_vec_matmul() {
+  let mul = FiniteFloat::new(0.3);
+  let mat: Matrix<_, _, _, 2> = Matrix::eye(16u8);
+  let one = vec![mul; 16];
+  let out = mat.par_vecmul(&one[..]);
+  for i in out {
+    assert_eq!(mul, i)
+  }
 }
