@@ -40,6 +40,8 @@ impl<I: Input, O: Output> PartialNode<I, O> {
   }
   fn add_output_prefix(&mut self, prefix: O) {
     if self.node.is_final {
+      // this is actually never reached because a node will be never in a prefix if it is
+      // final because it is always the last node.
       self.node.final_output = prefix.cat(&self.node.final_output);
     }
     for t in &mut self.node.transitions {

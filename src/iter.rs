@@ -67,13 +67,15 @@ where
 #[derive(Debug, Clone)]
 pub struct Iter<'f, D, I, O, const N: usize>
 where
-  [I; N]: LengthAtMost32, {
+  [I; N]: LengthAtMost32,
+  [(O, usize, Node<'f, O>); N]: LengthAtMost32, {
   matrix: &'f Matrix<D, I, O, N>,
   root: Node<'f, O>,
   root_curr: usize,
   /// Which inputs have been seen thus far
-  inputs: Vec<I>,
-  items: Vec<(O, usize, Node<'f, O>)>,
+  inputs: [I; N],
+  items: [(O, usize, Node<'f, O>); N],
+  curr_len: usize,
 }
 
 impl<'f, D, I, O, const N: usize> Iterator for Iter<'f, D, I, O, N>
@@ -84,51 +86,48 @@ where
   Bytes<O>: Deserialize,
   Bytes<I>: Deserialize,
   [I; N]: LengthAtMost32,
+  [(O, usize, Node<'f, O>); N]: LengthAtMost32,
 {
   type Item = ([I; N], O);
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
     loop {
-      while !self.items.is_empty() {
-        if let Some(ref mut last) = self.items.last_mut() {
-          let (out, curr, node) = last;
-          let is_final = node.is_final;
-          if *curr < node.num_trans {
-            *curr += 1;
-            let t = node.transition(*curr - 1);
-            let next_out = out.cat(&t.output);
-            let next_node = self.matrix.data.node(t.addr);
-            self.inputs.push(t.input);
-            self.items.push((next_out, 0, next_node));
-            debug_assert!(!is_final);
-            continue;
-          }
-          let (out, _, last) = self.items.pop().unwrap();
-          // TODO make this a check for item len which means we can remove the is_final
-          // from the node itself
-          if is_final {
-            let mut idxs = [Default::default(); N];
-            debug_assert_eq!(self.items.len(), N - 1); // because we popped one
-            idxs.copy_from_slice(&self.inputs[..]);
-            assert!(self.inputs.pop().is_some());
-            return Some((idxs, out.cat(&last.final_output)));
-          }
-          self.inputs.pop();
+      while self.curr_len > 0 {
+        assert!(self.curr_len <= N);
+        let is_final = self.curr_len == N;
+        let (out, curr, node) = &mut self.items[self.curr_len-1];
+        if *curr < node.num_trans {
+          assert!(!is_final);
+          *curr += 1;
+          let t = node.transition(*curr - 1);
+          let next_out = out.cat(&t.output);
+          let next_node = self.matrix.data.node(t.addr);
+          self.inputs[self.curr_len] = t.input;
+          self.items[self.curr_len] = (next_out, 0, next_node);
+          self.curr_len += 1;
+          continue;
         }
+        self.curr_len -= 1;
+        if !is_final {
+          continue
+        }
+        return Some((self.inputs, out.cat(&node.final_output)));
       }
       if self.root_curr >= self.root.num_trans {
         return None;
       }
       let t = self.root.transition(self.root_curr);
       let node = self.matrix.data.node(t.addr);
-      self.inputs.push(t.input);
-      self.items.push((t.output, 0, node));
+      assert_eq!(self.curr_len, 0);
+      self.inputs[self.curr_len] = t.input;
+      self.items[self.curr_len] = (t.output, 0, node);
       self.root_curr += 1;
+      self.curr_len = 1;
     }
   }
 }
 
-impl<D, I, O, const N: usize> Matrix<D, I, O, N>
+impl<'f, D, I, O, const N: usize> Matrix<D, I, O, N>
 where
   I: Input,
   O: Output,
@@ -136,16 +135,18 @@ where
   Bytes<O>: Deserialize,
   Bytes<I>: Deserialize,
   [I; N]: LengthAtMost32,
+  [(O, usize, Node<'f, O>); N]: LengthAtMost32,
 {
   #[inline]
-  pub fn iter(&self) -> Iter<'_, D, I, O, N> {
+  pub fn iter(&'f self) -> Iter<'f, D, I, O, N> {
     let root = self.data.root();
     Iter {
       matrix: self,
       root,
       root_curr: 0,
-      inputs: Vec::with_capacity(N),
-      items: Vec::with_capacity(N),
+      curr_len: 0,
+      inputs: [I::zero(); N],
+      items: [(O::zero(), 0, Node::placeholder()); N],
     }
   }
 }

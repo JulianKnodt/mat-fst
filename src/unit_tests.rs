@@ -136,7 +136,7 @@ fn many_u16_u64() {
   }
 }
 #[test]
-fn iter() {
+fn viter() {
   use crate::output::FiniteFloat;
   let mut builder = Builder::memory().unwrap();
   let n = 5u8;
@@ -156,6 +156,24 @@ fn iter() {
   assert!(fst.values().eq(expected));
 }
 
+#[test]
+fn iter() {
+  use crate::output::FiniteFloat;
+  let n = 5u8;
+  let items = (0..=n).flat_map(move |i| {
+     (0..=n).flat_map(move |j| {
+       (0..=n).map(move |k| {
+          ([i, j, k], FiniteFloat::new((i + j + k) as f32))
+       })
+     })
+  });
+  let mat = Matrix::new([n, n, n], items);
+  let expected = (0..=n).flat_map(|i| {
+    (0..=n).flat_map(move |j| (0..=n).map(move |k| ([i,j,k], FiniteFloat::new((i + j + k) as
+    f32))))
+  });
+  assert!(mat.iter().eq(expected));
+}
 #[test]
 fn vec_matmul() {
   let mul = FiniteFloat::new(0.3);

@@ -1,5 +1,4 @@
-use sparse_mat::{matrix::Matrix, output::FiniteFloat};
-use sparse_mat::util::compute_threshold;
+use sparse_mat::{matrix::Matrix, output::FiniteFloat, util::compute_threshold};
 use std::{
   fs::File,
   io::{BufRead, BufReader},

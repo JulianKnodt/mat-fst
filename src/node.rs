@@ -122,6 +122,8 @@ where
       final_output: O::zero(),
     }
   }
+  /// Returns a placeholder node which is not intended for use
+  pub fn placeholder() -> Node<'static, O> { Self::empty_final() }
   /// Gets the ith transition for this node
   pub(crate) fn transition<I: Input>(&self, i: usize) -> Transition<I, O>
   where
