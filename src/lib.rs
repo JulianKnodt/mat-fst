@@ -21,7 +21,12 @@ pub mod output;
 pub mod matrix;
 
 // utilities for sparsity
+mod circ_buf;
 pub mod util;
+
+// alternate matrix formats
+pub mod coo;
+pub mod csr;
 
 #[cfg(test)]
 #[macro_use]

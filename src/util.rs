@@ -12,3 +12,13 @@ pub fn compute_threshold<O: Ord + Copy, I: Iterator<Item = O>>(
   items.sort_unstable();
   items[dest_index]
 }
+
+#[inline]
+pub fn within<I: Ord, const N: usize>(pt: [I; N], bounds: [I; N]) -> bool {
+  for i in 0..N {
+    if bounds[i] <= pt[i] {
+      return false;
+    }
+  }
+  true
+}

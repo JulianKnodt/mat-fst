@@ -160,20 +160,16 @@ fn viter() {
 fn iter() {
   use crate::output::FiniteFloat;
   let n = 5u8;
-  let items = (0..=n).flat_map(move |i| {
-     (0..=n).flat_map(move |j| {
-       (0..=n).map(move |k| {
-          ([i, j, k], FiniteFloat::new((i + j + k) as f32))
-       })
-     })
+  let items = (0..n).flat_map(move |i| {
+    (0..n).flat_map(move |j| (0..n).map(move |k| ([i, j, k], FiniteFloat::new((i + j + k) as f32))))
   });
   let mat = Matrix::new([n, n, n], items);
-  let expected = (0..=n).flat_map(|i| {
-    (0..=n).flat_map(move |j| (0..=n).map(move |k| ([i,j,k], FiniteFloat::new((i + j + k) as
-    f32))))
+  let expected = (0..n).flat_map(|i| {
+    (0..n).flat_map(move |j| (0..n).map(move |k| ([i, j, k], FiniteFloat::new((i + j + k) as f32))))
   });
   assert!(mat.iter().eq(expected));
 }
+
 #[test]
 fn vec_matmul() {
   let mul = FiniteFloat::new(0.3);
@@ -183,6 +179,23 @@ fn vec_matmul() {
   for i in out {
     assert_eq!(mul, i)
   }
+}
+
+#[test]
+fn transpose() {
+  let mat: Matrix<_, _, u32, 2> = Matrix::eye(16u8);
+  // just check that it doesn't throw
+  let _ = mat.transpose();
+}
+
+#[test]
+fn matmul() {
+  let a: Matrix<_, _, u32, 2> = Matrix::eye(16u8);
+  let b: Matrix<_, _, u32, 2> = Matrix::eye(16u8);
+  // just check that it doesn't throw
+  let c = a.matmul(&b);
+  println!("{:?}", c.iter().collect::<Vec<_>>());
+  assert!(c.iter().eq(a.iter()));
 }
 
 #[test]

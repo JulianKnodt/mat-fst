@@ -19,8 +19,8 @@ pub struct Fst<D, I, O> {
   data: D,
   /// What is the output type of this FST?
   _output_type: PhantomData<O>,
+  /// What is the input type of this FST?
   _input_type: PhantomData<I>,
-  // TODO need to include an input type
 }
 
 #[derive(Debug)]
@@ -35,7 +35,6 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
     let bytes = data.as_ref();
     let initial_byte = Bytes::<u64>::read_le(&mut &bytes[..], 8)?.inner();
     assert_eq!(initial_byte, MAGIC_NUMBER);
-    // TODO read in number of dimensions here
     let end = bytes.len();
     let root_addr = u64_to_usize(Bytes::<u64>::read_le(&mut &bytes[end - 8..], 8)?.inner());
     let len = u64_to_usize(Bytes::<u64>::read_le(&mut &bytes[end - 16..], 8)?.inner());

@@ -1,10 +1,12 @@
+#![allow(unused)]
+
 use sparse_mat::{matrix::Matrix, output::FiniteFloat, util::compute_threshold};
 use std::{
   fs::File,
   io::{BufRead, BufReader},
 };
 
-const THRESHOLD: f32 = 0.031094962;
+const THRESHOLD: f32 = 0.031_094_963;
 // 0.005 works p well
 // 0.05 hits a lot of edge cases
 

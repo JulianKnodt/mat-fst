@@ -95,9 +95,9 @@ where
       while self.curr_len > 0 {
         assert!(self.curr_len <= N);
         let is_final = self.curr_len == N;
-        let (out, curr, node) = &mut self.items[self.curr_len-1];
+        let (out, curr, node) = &mut self.items[self.curr_len - 1];
         if *curr < node.num_trans {
-          assert!(!is_final);
+          debug_assert!(!is_final);
           *curr += 1;
           let t = node.transition(*curr - 1);
           let next_out = out.cat(&t.output);
@@ -109,7 +109,7 @@ where
         }
         self.curr_len -= 1;
         if !is_final {
-          continue
+          continue;
         }
         return Some((self.inputs, out.cat(&node.final_output)));
       }
@@ -149,8 +149,42 @@ where
       items: [(O::zero(), 0, Node::placeholder()); N],
     }
   }
+  #[inline]
+  pub fn pred<F>(&'f self, pred: F) -> PredIter<'f, F, D, I, O, N>
+  where
+    F: Fn(&'_ [I]) -> bool, {
+    let root = self.data.root();
+    PredIter {
+      matrix: self,
+      root,
+      pred,
+      root_curr: 0,
+      curr_len: 0,
+      inputs: [I::zero(); N],
+      items: [(O::zero(), 0, Node::placeholder()); N],
+    }
+  }
 }
-impl<D, I, O, const N: usize> Matrix<D, I, O, N>
+
+/// An iterator over keys and values for a matrix
+#[derive(Debug, Clone)]
+pub struct PredIter<'f, F, D, I, O, const N: usize>
+where
+  [I; N]: LengthAtMost32,
+  [(O, usize, Node<'f, O>); N]: LengthAtMost32, {
+  matrix: &'f Matrix<D, I, O, N>,
+  root: Node<'f, O>,
+  root_curr: usize,
+  /// Predicate to be used while checking whether it should continue
+  /// Will never be passed an empty slice
+  pred: F,
+  /// Which inputs have been seen thus far
+  inputs: [I; N],
+  items: [(O, usize, Node<'f, O>); N],
+  curr_len: usize,
+}
+
+impl<'f, F, D, I, O, const N: usize> Iterator for PredIter<'f, F, D, I, O, N>
 where
   I: Input,
   O: Output,
@@ -158,19 +192,50 @@ where
   Bytes<O>: Deserialize,
   Bytes<I>: Deserialize,
   [I; N]: LengthAtMost32,
-  [Range<I>; N]: LengthAtMost32,
+  [(O, usize, Node<'f, O>); N]: LengthAtMost32,
+  F: Fn(&'_ [I]) -> bool,
 {
+  type Item = ([I; N], O);
   #[inline]
-  pub fn select(&self, ranges: [Range<I>; N]) -> SelectIter<'_, D, I, O, N> {
-    let root = self.data.root();
-    let root_range = root.find_input_range(&ranges[0]);
-    let mut state = Vec::with_capacity(N);
-    state.push((O::zero(), root_range, root));
-    SelectIter {
-      matrix: &self,
-      ranges,
-      inputs: [Default::default(); N],
-      state,
+  fn next(&mut self) -> Option<Self::Item> {
+    loop {
+      while self.curr_len > 0 {
+        while !(self.pred)(&self.inputs[..self.curr_len]) && self.curr_len > 0 {
+          self.curr_len -= 1;
+        }
+        if self.curr_len == 0 {
+          break;
+        }
+        assert!(self.curr_len <= N);
+        let is_final = self.curr_len == N;
+        let (out, curr, node) = &mut self.items[self.curr_len - 1];
+        if *curr < node.num_trans {
+          debug_assert!(!is_final);
+          *curr += 1;
+          let t = node.transition(*curr - 1);
+          let next_out = out.cat(&t.output);
+          let next_node = self.matrix.data.node(t.addr);
+          self.inputs[self.curr_len] = t.input;
+          self.items[self.curr_len] = (next_out, 0, next_node);
+          self.curr_len += 1;
+          continue;
+        }
+        self.curr_len -= 1;
+        if !is_final {
+          continue;
+        }
+        return Some((self.inputs, out.cat(&node.final_output)));
+      }
+      if self.root_curr >= self.root.num_trans {
+        return None;
+      }
+      let t = self.root.transition(self.root_curr);
+      let node = self.matrix.data.node(t.addr);
+      assert_eq!(self.curr_len, 0);
+      self.inputs[self.curr_len] = t.input;
+      self.items[self.curr_len] = (t.output, 0, node);
+      self.root_curr += 1;
+      self.curr_len = 1;
     }
   }
 }
@@ -223,5 +288,30 @@ where
       }
     }
     None
+  }
+}
+
+impl<D, I, O, const N: usize> Matrix<D, I, O, N>
+where
+  I: Input,
+  O: Output,
+  D: AsRef<[u8]>,
+  Bytes<O>: Deserialize,
+  Bytes<I>: Deserialize,
+  [I; N]: LengthAtMost32,
+  [Range<I>; N]: LengthAtMost32,
+{
+  #[inline]
+  pub fn select(&self, ranges: [Range<I>; N]) -> SelectIter<'_, D, I, O, N> {
+    let root = self.data.root();
+    let root_range = root.find_input_range(&ranges[0]);
+    let mut state = Vec::with_capacity(N);
+    state.push((O::zero(), root_range, root));
+    SelectIter {
+      matrix: &self,
+      ranges,
+      inputs: [Default::default(); N],
+      state,
+    }
   }
 }

@@ -5,6 +5,7 @@ pub enum Error<I> {
   IO(io::Error),
   // Duplicate key without same output value
   DuplicateKey { key: Vec<I> },
+  // Got input sequence out of order
   OutOfOrder { prev: Vec<I>, next: Vec<I> },
 }
 

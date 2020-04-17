@@ -8,6 +8,7 @@ use crate::{
 use std::{
   convert::TryInto,
   io::{self, Write},
+  iter::{once, Once},
   marker::PhantomData,
   mem::size_of,
   ops::Range,
@@ -54,6 +55,34 @@ pub struct Node<'a, O> {
   sizes: IOSize,
   // TODO trim this final output
   pub(crate) final_output: O,
+}
+
+pub enum NodeTransIter<I, O, T> {
+  OneTransNext(Once<(I, CompiledAddr)>),
+  OneTrans(Once<Transition<I, O>>),
+  AnyTrans(T),
+}
+
+impl<I, O, T> Iterator for NodeTransIter<I, O, T>
+where
+  I: Input,
+  O: Output,
+  T: Iterator<Item = Transition<I, O>>,
+  Bytes<O>: Deserialize,
+  Bytes<I>: Deserialize,
+{
+  type Item = Transition<I, O>;
+  fn next(&mut self) -> Option<Self::Item> {
+    match self {
+      NodeTransIter::OneTransNext(o) => o.next().map(|(input, addr)| Transition {
+        input,
+        output: O::zero(),
+        addr,
+      }),
+      NodeTransIter::OneTrans(o) => o.next(),
+      NodeTransIter::AnyTrans(trans) => trans.next(),
+    }
+  }
 }
 
 impl<'f, O: Output> Node<'f, O>
@@ -250,6 +279,11 @@ impl StateOneTransNext {
     // node.data[node.start - 1]
   }
   const fn trans_addr<O>(self, node: &Node<'_, O>) -> CompiledAddr { node.end - 1 }
+  fn trans_iter<I: Input, O>(self, node: &Node<'_, O>) -> Once<(I, CompiledAddr)>
+  where
+    Bytes<I>: Deserialize, {
+    once((self.input(node), node.end - 1))
+  }
 }
 
 impl StateOneTrans {
@@ -333,6 +367,40 @@ impl StateOneTrans {
       .unwrap()
       .inner();
     undo_delta(node.end, delta)
+  }
+  fn trans_iter<I: Input, O: Output>(self, node: &Node<'_, O>) -> Once<Transition<I, O>>
+  where
+    Bytes<I>: Deserialize,
+    Bytes<O>: Deserialize, {
+    let input_size = self.input_len::<I>();
+    let mut i = node.start - 1 - input_size;
+    let input = Bytes::<I>::read_le(&mut &node.data[i..], input_size as u8)
+      .unwrap()
+      .inner();
+    let tsize = node.sizes.transition_bytes();
+    let delta = if tsize == 0 {
+      0
+    } else {
+      i = i - tsize;
+      Bytes::<u64>::read_le(&mut &node.data[i..], tsize as u8)
+        .unwrap()
+        .inner()
+    };
+    let addr = undo_delta(node.end, delta);
+    let osize = node.sizes.output_bytes();
+    let output = if osize == 0 {
+      O::zero()
+    } else {
+      let i = i - osize;
+      Bytes::<O>::read_le(&mut &node.data[i..], osize as u8)
+        .unwrap()
+        .inner()
+    };
+    once(Transition {
+      input,
+      addr,
+      output,
+    })
   }
 }
 
@@ -530,7 +598,6 @@ impl StateAnyTrans {
     let end = node.start - self.num_trans_len::<I>() - 1;
     let start = end - node.num_trans * input_len;
     // Iterate from left to right then flip number
-    debug_assert_eq!((end - start) % input_len, 0);
     node.data[start..end]
       .chunks_exact(input_len)
       .map(|mut chunk| Bytes::read_le(&mut chunk, input_len as u8).unwrap().inner())
