@@ -98,7 +98,7 @@ impl Serialize for Bytes<FiniteFloat<f32>> {
 
 impl Deserialize for Bytes<f32> {
   fn read_le<R: Read>(from: &mut R, n: u8) -> io::Result<Self> {
-    assert_eq!(n, 4);
+    assert!(n <= 4);
     let mut buf = [0; 4];
     from.read_exact(&mut buf)?;
     Ok(f32::from_le_bytes(buf).into())

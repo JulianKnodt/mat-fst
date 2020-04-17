@@ -57,34 +57,6 @@ pub struct Node<'a, O> {
   pub(crate) final_output: O,
 }
 
-pub enum NodeTransIter<I, O, T> {
-  OneTransNext(Once<(I, CompiledAddr)>),
-  OneTrans(Once<Transition<I, O>>),
-  AnyTrans(T),
-}
-
-impl<I, O, T> Iterator for NodeTransIter<I, O, T>
-where
-  I: Input,
-  O: Output,
-  T: Iterator<Item = Transition<I, O>>,
-  Bytes<O>: Deserialize,
-  Bytes<I>: Deserialize,
-{
-  type Item = Transition<I, O>;
-  fn next(&mut self) -> Option<Self::Item> {
-    match self {
-      NodeTransIter::OneTransNext(o) => o.next().map(|(input, addr)| Transition {
-        input,
-        output: O::zero(),
-        addr,
-      }),
-      NodeTransIter::OneTrans(o) => o.next(),
-      NodeTransIter::AnyTrans(trans) => trans.next(),
-    }
-  }
-}
-
 impl<'f, O: Output> Node<'f, O>
 where
   Bytes<O>: Deserialize,
@@ -151,7 +123,8 @@ where
       final_output: O::zero(),
     }
   }
-  /// Returns a placeholder node which is not intended for use
+  /// Returns a placeholder node which is intended to be used as a default node
+  /// with bad values
   pub fn placeholder() -> Node<'static, O> { Self::empty_final() }
   /// Gets the ith transition for this node
   pub(crate) fn transition<I: Input>(&self, i: usize) -> Transition<I, O>
@@ -214,6 +187,18 @@ where
       State::OneTrans(_) => 0..0,
 
       State::AnyTrans(s) => s.find_input_range(self, range),
+    }
+  }
+  pub fn trans_iter<'a, I: Input + 'a>(
+    &'a self,
+  ) -> NodeTransIter<I, O, impl Iterator<Item = Transition<I, O>> + '_>
+  where
+    Bytes<I>: Deserialize, {
+    match self.state {
+      State::EmptyFinal => NodeTransIter::None,
+      State::OneTransNext(s) => NodeTransIter::OneTransNext(s.trans_iter(&self)),
+      State::OneTrans(s) => NodeTransIter::OneTrans(s.trans_iter(&self)),
+      State::AnyTrans(s) => NodeTransIter::AnyTrans(s.trans_iter(&self)),
     }
   }
 }
@@ -372,30 +357,9 @@ impl StateOneTrans {
   where
     Bytes<I>: Deserialize,
     Bytes<O>: Deserialize, {
-    let input_size = self.input_len::<I>();
-    let mut i = node.start - 1 - input_size;
-    let input = Bytes::<I>::read_le(&mut &node.data[i..], input_size as u8)
-      .unwrap()
-      .inner();
-    let tsize = node.sizes.transition_bytes();
-    let delta = if tsize == 0 {
-      0
-    } else {
-      i = i - tsize;
-      Bytes::<u64>::read_le(&mut &node.data[i..], tsize as u8)
-        .unwrap()
-        .inner()
-    };
-    let addr = undo_delta(node.end, delta);
-    let osize = node.sizes.output_bytes();
-    let output = if osize == 0 {
-      O::zero()
-    } else {
-      let i = i - osize;
-      Bytes::<O>::read_le(&mut &node.data[i..], osize as u8)
-        .unwrap()
-        .inner()
-    };
+    let input = self.input::<I, O>(node);
+    let addr = self.trans_addr::<I, O>(node);
+    let output = self.output::<I, O>(node);
     once(Transition {
       input,
       addr,
@@ -628,6 +592,40 @@ impl StateAnyTrans {
     };
     start..end
   }
+  fn trans_iter<'a, I: Input, O: Output>(
+    self,
+    node: &'a Node<'_, O>,
+  ) -> impl Iterator<Item = Transition<I, O>> + 'a
+  where
+    Bytes<I>: Deserialize,
+    Bytes<O>: Deserialize, {
+    let obytes = node.sizes.output_bytes();
+    let tbytes = node.sizes.transition_bytes();
+    let ibytes = self.input_len::<I>();
+    let input_start = node.start - self.num_trans_len::<I>() - 1;
+    let trans_start = input_start - node.num_trans * ibytes;
+    let output_start = trans_start - node.num_trans * tbytes;
+    (0..node.num_trans).map(move |i| {
+      let i_idx = input_start - ((i + 1) * ibytes);
+      let input = Bytes::<I>::read_le(&mut &node.data[i_idx..], ibytes as u8)
+        .unwrap()
+        .inner();
+      let t_idx = trans_start - ((i + 1) * tbytes);
+      let delta = Bytes::<u64>::read_le(&mut &node.data[t_idx..], tbytes as u8)
+        .unwrap()
+        .inner();
+      let addr = undo_delta(node.end, delta);
+      let o_idx = output_start - ((i + 1) * obytes);
+      let output = Bytes::<O>::read_le(&mut &node.data[o_idx..], obytes as u8)
+        .unwrap()
+        .inner();
+      Transition {
+        input,
+        output,
+        addr,
+      }
+    })
+  }
 }
 
 /// IOSize represents the input output size for a given node.
@@ -694,5 +692,36 @@ fn undo_delta(node_addr: CompiledAddr, delta: u64) -> CompiledAddr {
     END_ADDRESS
   } else {
     node_addr - delta
+  }
+}
+
+#[derive(Debug)]
+pub enum NodeTransIter<I, O, T> {
+  OneTransNext(Once<(I, CompiledAddr)>),
+  OneTrans(Once<Transition<I, O>>),
+  AnyTrans(T),
+  None,
+}
+
+impl<I, O, T> Iterator for NodeTransIter<I, O, T>
+where
+  I: Input,
+  O: Output,
+  T: Iterator<Item = Transition<I, O>>,
+  Bytes<O>: Deserialize,
+  Bytes<I>: Deserialize,
+{
+  type Item = Transition<I, O>;
+  fn next(&mut self) -> Option<Self::Item> {
+    match self {
+      NodeTransIter::OneTransNext(o) => o.next().map(|(input, addr)| Transition {
+        input,
+        output: O::zero(),
+        addr,
+      }),
+      NodeTransIter::OneTrans(o) => o.next(),
+      NodeTransIter::AnyTrans(trans) => trans.next(),
+      NodeTransIter::None => None,
+    }
   }
 }

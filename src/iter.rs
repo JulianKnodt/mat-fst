@@ -1,4 +1,11 @@
-use crate::{bytes::*, fst::Fst, input::Input, matrix::Matrix, node::Node, output::Output};
+use crate::{
+  bytes::*,
+  fst::{Fst, Transition},
+  input::Input,
+  matrix::Matrix,
+  node::Node,
+  output::Output,
+};
 use num::Zero;
 use std::{array::LengthAtMost32, ops::Range};
 
@@ -312,6 +319,27 @@ where
       ranges,
       inputs: [Default::default(); N],
       state,
+    }
+  }
+}
+
+impl<D, I, O> Matrix<D, I, O, 2>
+where
+  I: Input,
+  O: Output,
+  D: AsRef<[u8]>,
+  Bytes<O>: Deserialize,
+  Bytes<I>: Deserialize,
+{
+  pub fn eager_iter<F>(&self, mut f: F)
+  where
+    F: FnMut([I; 2], O), {
+    let root = self.data.root();
+    for t0 in root.trans_iter() {
+      let node = self.data.node(t0.addr);
+      for t1 in node.trans_iter() {
+        f([t0.input, t1.input], t0.output.cat(&t1.output))
+      }
     }
   }
 }

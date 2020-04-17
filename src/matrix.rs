@@ -31,7 +31,7 @@ where
     for (k, v) in i {
       assert!(
         within(k, dims),
-        "Point outside of given dimensions: {:?} < {:?}",
+        "Point outside of given dims: {:?} < {:?}",
         dims,
         k
       );
@@ -74,10 +74,16 @@ where
       "Dimension mismatch, expected output of size {}",
       self.dims[0]
     );
+    self.eager_iter(|[y, x], v| {
+      let y = y.as_usize();
+      out[y] = out[y] + v * vec[x.as_usize()];
+    });
+    /*
     self.iter().for_each(|([y, x], v)| {
       let y = y.as_usize();
       out[y] = out[y] + v * vec[x.as_usize()];
     });
+    */
   }
 }
 
