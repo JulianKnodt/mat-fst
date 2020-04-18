@@ -31,9 +31,16 @@ impl<I: Input, O: Output, const N: usize> Dense<I, O, N> {
   pub fn new(dims: [I; N]) -> Self
   where
     I: Mul<Output = I>, {
-    let len = dims.iter().fold(I::one(), |a, &n| a * n);
+    let mut len: usize = 1;
+    for d in dims.iter() {
+      assert!(!d.is_zero(), "0 length dimension passed to dense matrix");
+      len = len
+        .checked_mul(d.as_usize())
+        .expect("Length cannot be represented");
+    }
+    assert_ne!(len, 0);
     Dense {
-      items: vec![O::zero(); len.as_usize()].into_boxed_slice(),
+      items: vec![O::zero(); len].into_boxed_slice(),
       dims,
     }
   }
