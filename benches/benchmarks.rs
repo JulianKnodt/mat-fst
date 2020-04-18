@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use num::One;
-use sparse_mat::{coo::COO, matrix::Matrix, output::FiniteFloat};
+use sparse_mat::{dense::Dense, matrix::Matrix, output::FiniteFloat};
 use std::{
   fs::File,
   io::{BufRead, BufReader},
@@ -59,7 +59,7 @@ pub fn low_nnz(c: &mut Criterion) {
 pub fn low_nnz_conv(c: &mut Criterion) {
   let mat = load_matrix(0.05);
   let kernel = [[FiniteFloat::one(); 5]; 5];
-  let mut out = COO::new(mat.dims);
+  let mut out = Dense::new(mat.dims);
   c.bench_function("convolve 5x5 kernel low nnz", |b| {
     b.iter(|| mat.convolve_2d_into(black_box(kernel), &mut out))
   });

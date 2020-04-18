@@ -224,9 +224,9 @@ fn convolve() {
   for i in 0..cap {
     for j in 0..cap {
       if i == j || i == j + 1 || j == i + 1 {
-        assert!(output.get([i, j]).is_one());
+        assert!(output[[i, j]].is_one());
       } else {
-        assert!(output.get([i, j]).is_zero());
+        assert!(output[[i, j]].is_zero());
       }
     }
   }

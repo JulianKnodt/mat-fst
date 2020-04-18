@@ -47,7 +47,8 @@ impl<I: Input, O, const N: usize> Index<[I; N]> for Dense<I, O, N> {
 
 impl<I: Input, O, const N: usize> IndexMut<[I; N]> for Dense<I, O, N> {
   fn index_mut(&mut self, idx: [I; N]) -> &mut Self::Output {
-    &mut self.items[compute_raw_index(idx, self.dims)]
+    let raw = compute_raw_index(idx, self.dims);
+    &mut self.items[raw]
   }
 }
 

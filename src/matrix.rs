@@ -1,12 +1,12 @@
 use crate::{
-  build::Builder, bytes::*, coo::COO, fst::Fst, input::Input, node::Node, output::Output,
-  dense::Dense,
-  util::within,
+  build::Builder, bytes::*, coo::COO, dense::Dense, fst::Fst, input::Input, node::Node,
+  output::Output, util::within,
 };
 use num::{One, Zero};
 use std::{
   array::LengthAtMost32,
   cmp::Ordering,
+  mem::replace,
   ops::{Index, Mul, RangeBounds, Sub},
 };
 
@@ -327,16 +327,21 @@ where
       // flush buffer in the x direction might have to flush if wrapped
       let d1 = x.as_usize().checked_sub(l_c[1].as_usize()).unwrap_or(K);
       buf.eager_shift_modify([d0, d1], |y_coord, x_coord, v| {
-        let val = *v;
-        *v = O::zero();
+        let val = replace(v, O::zero());
         let dy = (l_c[0].as_usize() + mid).checked_sub(K - 1 - x_coord);
         let dy = if let Some(dy) = dy { dy } else { return };
         let dy = I::from_usize(dy);
+        if dy >= self.dims[0] {
+          return;
+        }
         let dx = (l_c[1].as_usize() + mid).checked_sub(K - 1 - y_coord);
         let dx = if let Some(dx) = dx { dx } else { return };
         let dx = I::from_usize(dx);
-        let o = &mut out[[dy, dy]];
-        *o = *o + *v;
+        if dx >= self.dims[1] {
+          return;
+        }
+        let output = &mut out[[dy, dx]];
+        *output = *output + val;
       });
       // update lc position of buffer
       l_c = i;
@@ -353,10 +358,16 @@ where
       let dy = (y.as_usize() + mid).checked_sub(K - 1 - y_coord);
       let dy = if let Some(dy) = dy { dy } else { return };
       let dy = I::from_usize(dy);
+      if dy >= self.dims[0] {
+        return;
+      }
       let dx = (x.as_usize() + mid).checked_sub(K - 1 - x_coord);
       let dx = if let Some(dx) = dx { dx } else { return };
       let dx = I::from_usize(dx);
-      let o = &mut out[[dy, dy]];
+      if dx >= self.dims[1] {
+        return;
+      }
+      let o = &mut out[[dy, dx]];
       *o = *o + *v;
     })
   }
