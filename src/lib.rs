@@ -27,6 +27,7 @@ pub mod util;
 // alternate matrix formats
 pub mod coo;
 pub mod csr;
+pub mod dense;
 
 #[cfg(test)]
 #[macro_use]

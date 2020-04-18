@@ -1,5 +1,6 @@
 use crate::{
   build::Builder, bytes::*, coo::COO, fst::Fst, input::Input, node::Node, output::Output,
+  dense::Dense,
   util::within,
 };
 use num::{One, Zero};
@@ -296,21 +297,20 @@ where
     }
   }
 
-  pub fn convolve_2d<const K: usize>(&self, kernel: [[O; K]; K]) -> COO<I, O, 2>
+  pub fn convolve_2d<const K: usize>(&self, kernel: [[O; K]; K]) -> Dense<I, O, 2>
   where
     I: Sub<Output = I>, {
-    let mut out = COO::new(self.dims);
+    let mut out = Dense::new(self.dims);
     self.convolve_2d_into(kernel, &mut out);
     out
   }
 
   /// Convolves this matrix by a 2D kernel of size K known at compile time.
   /// Creating a new output in the Coordinate Format.
-  pub fn convolve_2d_into<const K: usize>(&self, kernel: [[O; K]; K], out: &mut COO<I, O, 2>)
+  pub fn convolve_2d_into<const K: usize>(&self, kernel: [[O; K]; K], out: &mut Dense<I, O, 2>)
   where
     I: Sub<Output = I>, {
     use crate::circ_buf::CircularBuffer2D;
-    // can we use a circular buffer of circular buffers?
     assert!(K > 0);
     assert!(K % 2 == 1, "Only supports odd kernels");
     // circular buffer of items
@@ -320,51 +320,45 @@ where
     // central buffer coordinate
     let mut l_c = [I::zero(); 2];
     for (i, o) in self.iter() {
-      assert!(i >= l_c);
+      debug_assert!(i >= l_c, "Invariant broken, not iterating in order");
       let [y, x] = i;
       // how much we're shifting in each direction
       let d0 = (y - l_c[0]).as_usize();
       // flush buffer in the x direction might have to flush if wrapped
-      let d1 = if x < l_c[1] {
-        K
-      } else {
-        (x - l_c[1]).as_usize()
-      };
-      let mut iter = buf.covered([d0, d1]).filter(|(_, v)| !v.is_zero());
-      for ([y_coord, x_coord], v) in iter {
-        let x_diff = K - 1 - x_coord;
-        let y_diff = K - 1 - y_coord;
+      let d1 = x.as_usize().checked_sub(l_c[1].as_usize()).unwrap_or(K);
+      buf.eager_shift_modify([d0, d1], |y_coord, x_coord, v| {
+        let val = *v;
+        *v = O::zero();
         let dy = (l_c[0].as_usize() + mid).checked_sub(K - 1 - x_coord);
-        let dy = if let Some(dy) = dy { dy } else { continue };
+        let dy = if let Some(dy) = dy { dy } else { return };
         let dy = I::from_usize(dy);
         let dx = (l_c[1].as_usize() + mid).checked_sub(K - 1 - y_coord);
-        let dx = if let Some(dx) = dx { dx } else { continue };
+        let dx = if let Some(dx) = dx { dx } else { return };
         let dx = I::from_usize(dx);
-        out.set([dy, dx], out.get([dy, dx]) + v);
-      }
-      buf.shift([d0, d1], O::zero());
+        let o = &mut out[[dy, dy]];
+        *o = *o + *v;
+      });
       // update lc position of buffer
       l_c = i;
       for i in 0..K {
         for j in 0..K {
           let v = kernel[K - i - 1][K - j - 1];
-          if !v.is_zero() {
-            buf.set([i, j], buf.get([i, j]) + v * o);
-          }
+          let mut item = buf.entry([i, j]);
+          *item = *item + v * o;
         }
       }
     }
     let [y, x] = l_c;
-    let mut iter = buf.covered([K, K]).filter(|(_, v)| !v.is_zero());
-    for ([y_coord, x_coord], v) in iter {
+    buf.eager_shift_modify([K, K], |y_coord, x_coord, v| {
       let dy = (y.as_usize() + mid).checked_sub(K - 1 - y_coord);
-      let dy = if let Some(dy) = dy { dy } else { continue };
+      let dy = if let Some(dy) = dy { dy } else { return };
       let dy = I::from_usize(dy);
       let dx = (x.as_usize() + mid).checked_sub(K - 1 - x_coord);
-      let dx = if let Some(dx) = dx { dx } else { continue };
+      let dx = if let Some(dx) = dx { dx } else { return };
       let dx = I::from_usize(dx);
-      out.set([dy, dx], out.get([dy, dx]) + v);
-    }
+      let o = &mut out[[dy, dy]];
+      *o = *o + *v;
+    })
   }
 }
 

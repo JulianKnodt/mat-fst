@@ -51,17 +51,23 @@ impl<T: Copy, const L: usize> CircularBuffer2D<T, L> {
   }
   #[inline]
   pub fn get(&self, c: [usize; 2]) -> T {
-    assert!(c < [L, L]);
     let [c0, c1] = c;
+    assert!(c0 < L && c1 < L);
     let [s0, s1] = self.start_coord;
     self.items[(c0 + s0) % L][(c1 + s1) % L]
   }
   #[inline]
   pub fn set(&mut self, c: [usize; 2], t: T) {
-    assert!(c < [L, L]);
     let [c0, c1] = c;
+    assert!(c0 < L && c1 < L);
     let [s0, s1] = self.start_coord;
     self.items[(c0 + s0) % L][(c1 + s1) % L] = t;
+  }
+  pub fn entry(&mut self, c: [usize; 2]) -> &mut T {
+    let [c0, c1] = c;
+    assert!(c0 < L && c1 < L);
+    let [s0, s1] = self.start_coord;
+    &mut self.items[(c0 + s0) % L][(c1 + s1) % L]
   }
 
   /// Gets item covered if a certain range of this iterator was shifted
@@ -94,5 +100,45 @@ impl<T: Copy, const L: usize> CircularBuffer2D<T, L> {
         self.items[(s0 + y) % L][(s1 + x) % L] = def;
       }
     }
+  }
+  pub fn eager_shift_modify<F>(&mut self, c: [usize; 2], mut f: F)
+  where
+    F: FnMut(usize, usize, &mut T), {
+    let [c0, c1] = c;
+    let c0 = c0.min(L);
+    let c1 = c1.min(L);
+    let [s0, s1] = self.start_coord;
+    self.start_coord = [(s0 + c0) % L, (s1 + c1) % L];
+    for y in 0..c0 {
+      let modded = (s0 + y) % L;
+      for x in 0..L {
+        f(y, x, &mut self.items[modded][(s1 + x) % L]);
+      }
+    }
+    for y in c0..L {
+      let modded = (s0 + y) % L;
+      for x in 0..c1 {
+        f(y, x, &mut self.items[modded][(s1 + x) % L]);
+      }
+    }
+    /*
+    let [c0, c1] = c;
+    let c0 = c0.min(L);
+    let c1 = c1.min(L);
+    let [s0, s1] = self.start_coord;
+    self.start_coord = [(s0 + c0) % L, (s1 + c1) % L];
+    // TODO move the mods to the outer loop reducing the work done inside
+    // altho I wonder if the compiler might optimize that away
+    for y in (s0..s0+c0).map(|y| y % L) {
+      for x in 0..L {
+        f(y, x, &mut self.items[y][x]);
+      }
+    }
+    for y in c0..L {
+      for x in (s1..s1+c1).map(|x| x % L) {
+        f(y, x, &mut self.items[y][x]);
+      }
+    }
+    */
   }
 }

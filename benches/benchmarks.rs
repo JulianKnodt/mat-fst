@@ -1,13 +1,12 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use sparse_mat::{matrix::Matrix, output::FiniteFloat};
-use sparse_mat::coo::COO;
+use num::One;
+use sparse_mat::{coo::COO, matrix::Matrix, output::FiniteFloat};
 use std::{
   fs::File,
   io::{BufRead, BufReader},
   path::Path,
   time::Duration,
 };
-use num::One;
 
 // 0.005 works p well
 // 0.05 hits a lot of edge cases
@@ -54,11 +53,6 @@ pub fn low_nnz(c: &mut Criterion) {
     b.iter(|| {
       mat.vecmul_into(black_box(&vec), &mut out);
     })
-  });
-  let mut out = COO::new(mat.dims);
-  let kernel = [[FiniteFloat::one(); 5]; 5];
-  c.bench_function("convolve 5x5 kernel low nnz", |b| {
-    b.iter(|| mat.convolve_2d_into(kernel, &mut out))
   });
 }
 
