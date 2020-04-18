@@ -3,7 +3,7 @@ use crate::{
   matrix::Matrix,
   output::{FiniteFloat, Unit},
 };
-use num::One;
+use num::{One, Zero};
 
 #[test]
 fn one_unit() {
@@ -194,8 +194,42 @@ fn matmul() {
   let b: Matrix<_, _, u32, 2> = Matrix::eye(16u8);
   // just check that it doesn't throw
   let c = a.matmul(&b);
-  println!("{:?}", c.iter().collect::<Vec<_>>());
   assert!(c.iter().eq(a.iter()));
+}
+
+#[test]
+fn convolve() {
+  let cap = 6u8;
+  let a: Matrix<_, _, FiniteFloat<f32>, 2> = Matrix::eye(cap);
+  let l = FiniteFloat::one();
+  let o = FiniteFloat::<f32>::zero();
+  let h = FiniteFloat::new(0.5);
+  /*
+  let output = a.convolve_2d([[l]]);
+  */
+  /*
+  let output = a.convolve_2d([
+    [o, o, o],
+    [o, l, o],
+    [o, o, o],
+  ]);
+  */
+  let output = a.convolve_2d([
+    [o, o, o, o, o],
+    [o, o, h, o, o],
+    [o, h, l, h, o],
+    [o, o, h, o, o],
+    [o, o, o, o, o],
+  ]);
+  for i in 0..cap {
+    for j in 0..cap {
+      if i == j || i == j + 1 || j == i + 1 {
+        assert!(output.get([i, j]).is_one());
+      } else {
+        assert!(output.get([i, j]).is_zero());
+      }
+    }
+  }
 }
 
 #[test]

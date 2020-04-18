@@ -282,7 +282,7 @@ where
       }
       last_x = x;
       for i in 0..K {
-        buf.set(i, buf.get(i) + kernel[K - i] * o);
+        buf.set(i, buf.get(i) + kernel[K - i - 1] * o);
       }
     }
     for (i, v) in buf.shift(K, O::zero()).enumerate() {
@@ -296,56 +296,75 @@ where
     }
   }
 
+  pub fn convolve_2d<const K: usize>(&self, kernel: [[O; K]; K]) -> COO<I, O, 2>
+  where
+    I: Sub<Output = I>, {
+    let mut out = COO::new(self.dims);
+    self.convolve_2d_into(kernel, &mut out);
+    out
+  }
+
   /// Convolves this matrix by a 2D kernel of size K known at compile time.
   /// Creating a new output in the Coordinate Format.
-  pub fn convolve_2d<const K: usize>(&self, kernel: [[O; K]; K]) -> COO<I, O, 2>
+  pub fn convolve_2d_into<const K: usize>(&self, kernel: [[O; K]; K], out: &mut COO<I, O, 2>)
   where
     I: Sub<Output = I>, {
     use crate::circ_buf::CircularBuffer2D;
     // can we use a circular buffer of circular buffers?
     assert!(K > 0);
-    let mut out = COO::new(self.dims);
+    assert!(K % 2 == 1, "Only supports odd kernels");
     // circular buffer of items
     let mut buf: CircularBuffer2D<O, K> = CircularBuffer2D::new(O::zero());
+    let mid = (K - 1) / 2;
 
-    // this is the matrix coordinate of the last bottom right coord in the circular buffer
+    // central buffer coordinate
     let mut l_c = [I::zero(); 2];
-
     for (i, o) in self.iter() {
       assert!(i >= l_c);
       let [y, x] = i;
-      let [d0, d1] = [(y - l_c[0]).as_usize(), (x - l_c[1]).as_usize()];
-      for (i, v) in buf.covered([d0, d1]).enumerate() {
-        let dy = (l_c[0].as_usize() + (i - (i % d1))).checked_sub(K);
-        if let Some(dy) = dy {
-          let dx = (l_c[1].as_usize() + (i % d1)).checked_sub(K);
-          if let Some(dx) = dx {
-            let dy = I::from_usize(dy);
-            let dx = I::from_usize(dx);
-            out.set([dy, dx], out.get([dy, dx]) + v);
+      // how much we're shifting in each direction
+      let d0 = (y - l_c[0]).as_usize();
+      // flush buffer in the x direction might have to flush if wrapped
+      let d1 = if x < l_c[1] {
+        K
+      } else {
+        (x - l_c[1]).as_usize()
+      };
+      let mut iter = buf.covered([d0, d1]).filter(|(_, v)| !v.is_zero());
+      for ([y_coord, x_coord], v) in iter {
+        let x_diff = K - 1 - x_coord;
+        let y_diff = K - 1 - y_coord;
+        let dy = (l_c[0].as_usize() + mid).checked_sub(K - 1 - x_coord);
+        let dy = if let Some(dy) = dy { dy } else { continue };
+        let dy = I::from_usize(dy);
+        let dx = (l_c[1].as_usize() + mid).checked_sub(K - 1 - y_coord);
+        let dx = if let Some(dx) = dx { dx } else { continue };
+        let dx = I::from_usize(dx);
+        out.set([dy, dx], out.get([dy, dx]) + v);
+      }
+      buf.shift([d0, d1], O::zero());
+      // update lc position of buffer
+      l_c = i;
+      for i in 0..K {
+        for j in 0..K {
+          let v = kernel[K - i - 1][K - j - 1];
+          if !v.is_zero() {
+            buf.set([i, j], buf.get([i, j]) + v * o);
           }
         }
       }
-      buf.shift([d0, d1], O::zero());
-      l_c = [y, x];
-      for i in 0..K {
-        for j in 0..K {
-          buf.set([i, j], buf.get([i, j]) + kernel[K - i][K - j] * o);
-        }
-      }
     }
-    for (i, v) in buf.covered([K, K]).enumerate() {
-      let dy = (l_c[0].as_usize() + (i - (i % K))).checked_sub(K);
-      if let Some(dy) = dy {
-        let dx = (l_c[1].as_usize() + (i % K)).checked_sub(K);
-        if let Some(dx) = dx {
-          let dy = I::from_usize(dy);
-          let dx = I::from_usize(dx);
-          out.set([dy, dx], out.get([dy, dx]) + v);
-        }
-      }
+    let [y, x] = l_c;
+    let mut iter = buf.covered([K, K]).filter(|(_, v)| !v.is_zero());
+    for ([y_coord, x_coord], v) in iter {
+      let dy = (y.as_usize() + mid).checked_sub(K - 1 - y_coord);
+      let dy = if let Some(dy) = dy { dy } else { continue };
+      let dy = I::from_usize(dy);
+      let dx = (x.as_usize() + mid).checked_sub(K - 1 - x_coord);
+      let dx = if let Some(dx) = dx { dx } else { continue };
+      let dx = I::from_usize(dx);
+      out.set([dy, dx], out.get([dy, dx]) + v);
     }
-    out
   }
 }
 

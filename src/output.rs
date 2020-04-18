@@ -5,6 +5,7 @@ use std::{
   cmp,
   fmt::Debug,
   hash::{Hash, Hasher},
+  mem::transmute,
   ops::{Add, Mul, Sub},
 };
 
@@ -24,6 +25,7 @@ pub trait Output: Prefix + Zero + Hash + Eq + Sized + Clone + Copy + Debug {
   fn rm_pre(&self, prefix: &Self) -> Self;
 }
 
+/*
 impl<T> Output for T
 where
   T: Prefix + Zero + Sub<Self, Output = Self> + Hash + Add<Self, Output = Self> + Copy + Eq + Debug,
@@ -31,6 +33,7 @@ where
   fn cat(&self, o: &Self) -> Self { *self + *o }
   fn rm_pre(&self, o: &Self) -> Self { *self - *o }
 }
+*/
 
 macro_rules! default_prefix {
   ($t: ty) => {
@@ -43,6 +46,20 @@ default_prefix!(u8);
 default_prefix!(u16);
 default_prefix!(u32);
 default_prefix!(u64);
+
+macro_rules! default_output {
+  ($t: ty) => {
+    impl Output for $t {
+      fn cat(&self, o: &Self) -> Self { *self + *o }
+      fn rm_pre(&self, o: &Self) -> Self { *self - *o }
+    }
+  };
+}
+
+default_output!(u8);
+default_output!(u16);
+default_output!(u32);
+default_output!(u64);
 
 /// A float which implements Ord and Eq for use with FST packages
 /// Assuming that the float constructed
@@ -111,6 +128,42 @@ where
 {
   fn cat(&self, o: &Self) -> Self { FiniteFloat::new(self.0 + o.0) }
   fn rm_pre(&self, o: &Self) -> Self { FiniteFloat::new(self.0 - o.0) }
+}
+
+/// f32 which is internally casted to a u32
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TransmutedF32(u32);
+impl TransmutedF32 {
+  pub fn new(v: f32) -> Self { Self(unsafe { transmute(v) }) }
+  pub fn v(&self) -> f32 { unsafe { transmute(self.0) } }
+}
+impl Zero for TransmutedF32 {
+  fn zero() -> Self { Self::new(0.0) }
+  fn is_zero(&self) -> bool { self.v().is_zero() }
+}
+
+impl Add for TransmutedF32 {
+  type Output = Self;
+  fn add(self, o: Self) -> Self { Self::new(self.v() + o.v()) }
+}
+
+impl Sub for TransmutedF32 {
+  type Output = Self;
+  fn sub(self, o: Self) -> Self { Self::new(self.v() - o.v()) }
+}
+
+impl Mul for TransmutedF32 {
+  type Output = Self;
+  fn mul(self, o: Self) -> Self { Self::new(self.v() * o.v()) }
+}
+
+impl Prefix for TransmutedF32 {
+  fn prefix(&self, o: &Self) -> Self { TransmutedF32(self.0.min(o.0)) }
+}
+
+impl Output for TransmutedF32 {
+  fn cat(&self, o: &Self) -> Self { TransmutedF32(self.0 + o.0) }
+  fn rm_pre(&self, o: &Self) -> Self { TransmutedF32(self.0 - o.0) }
 }
 
 /// A ZST which is an FST compatible unit type.

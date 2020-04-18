@@ -38,7 +38,7 @@ impl<T: Copy, const L: usize> CircularBuffer<T, L> {
 
 /// A 2 dimensional square circular buffer
 pub struct CircularBuffer2D<T, const L: usize> {
-  items: [[T; L]; L],
+  pub(crate) items: [[T; L]; L],
   start_coord: [usize; 2],
 }
 
@@ -65,14 +65,18 @@ impl<T: Copy, const L: usize> CircularBuffer2D<T, L> {
   }
 
   /// Gets item covered if a certain range of this iterator was shifted
-  pub fn covered(&self, c: [usize; 2]) -> impl Iterator<Item = T> + '_ {
+  pub fn covered(&self, c: [usize; 2]) -> impl Iterator<Item = ([usize; 2], T)> + '_ {
     let [c0, c1] = c;
     let c0 = c0.min(L);
     let c1 = c1.min(L);
     let [s0, s1] = self.start_coord;
-    (s0..s0 + c0)
-      .map(|y| y % L)
-      .flat_map(move |y| (s1..s1 + c1).map(|x| x % L).map(move |x| self.items[y][x]))
+    (0..c0)
+      .flat_map(move |y| (0..L).map(move |x| ([y, x], self.items[(s0 + y) % L][(s1 + x) % L])))
+      .chain(
+        (c0..L).flat_map(move |y| {
+          (0..c1).map(move |x| ([y, x], self.items[(s0 + y) % L][(s1 + x) % L]))
+        }),
+      )
   }
   pub fn shift(&mut self, c: [usize; 2], def: T) {
     let [c0, c1] = c;
@@ -80,11 +84,14 @@ impl<T: Copy, const L: usize> CircularBuffer2D<T, L> {
     let c1 = c1.min(L);
     let [s0, s1] = self.start_coord;
     self.start_coord = [(s0 + c0) % L, (s1 + c1) % L];
-    for y in s0..s0 + c0 {
-      let y = y % L;
-      for x in s1..s1 + c1 {
-        let x = x % L;
-        self.items[y][x] = def;
+    for y in 0..c0 {
+      for x in 0..L {
+        self.items[(s0 + y) % L][(s1 + x) % L] = def;
+      }
+    }
+    for y in c0..L {
+      for x in 0..c1 {
+        self.items[(s0 + y) % L][(s1 + x) % L] = def;
       }
     }
   }

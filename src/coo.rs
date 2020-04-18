@@ -5,7 +5,7 @@ use std::{array::LengthAtMost32, collections::BTreeMap};
 pub struct COO<I, O, const N: usize>
 where
   [I; N]: LengthAtMost32, {
-  items: BTreeMap<[I; N], O>,
+  pub(crate) items: BTreeMap<[I; N], O>,
   dims: [I; N],
 }
 
