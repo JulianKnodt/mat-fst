@@ -18,7 +18,7 @@ pub trait Prefix {
 
 /// Represents an associatable output alphabet for the FST
 // it should be noted that zero also enforces Add between types
-pub trait Output: Prefix + Zero + Hash + Eq + Sized + Clone + Copy + Debug {
+pub trait Output: Prefix + Zero + Sized + Clone + Copy + Debug {
   /// Appends o to self
   fn cat(&self, o: &Self) -> Self;
   /// Removes the prefix from self

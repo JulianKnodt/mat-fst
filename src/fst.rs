@@ -6,7 +6,7 @@ use crate::{
   node::Node,
   output::Output,
 };
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem::size_of};
 
 /// Represents a location in the FST.
 pub type CompiledAddr = usize;
@@ -17,8 +17,8 @@ pub(crate) const INVALID_ADDRESS: CompiledAddr = 1;
 pub struct Fst<D, I, O> {
   meta: Meta,
   data: D,
-  /// What is the output type of this FST?
-  _output_type: PhantomData<O>,
+  /// Output values associated with this FST
+  pub(crate) outputs: Vec<O>,
   /// What is the input type of this FST?
   _input_type: PhantomData<I>,
 }
@@ -31,40 +31,48 @@ pub struct Meta {
 }
 
 impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
-  pub fn new(data: D) -> Result<Fst<D, I, O>, I> {
+  pub fn new(data: D) -> Result<Fst<D, I, O>, I>
+  where
+    Bytes<O>: Deserialize, {
     let bytes = data.as_ref();
     let initial_byte = Bytes::<u64>::read_le(&mut &bytes[..], 8)?.inner();
     assert_eq!(initial_byte, MAGIC_NUMBER);
     let end = bytes.len();
     let root_addr = u64_to_usize(Bytes::<u64>::read_le(&mut &bytes[end - 8..], 8)?.inner());
     let len = u64_to_usize(Bytes::<u64>::read_le(&mut &bytes[end - 16..], 8)?.inner());
+    let obytes = size_of::<O>();
+    let outputs = (0..len)
+      .map(|i| {
+        Bytes::<O>::read_le(
+          &mut &bytes[end - len * obytes + i * obytes - 16..],
+          obytes as u8,
+        )
+        .unwrap()
+        .inner()
+      })
+      .collect::<Vec<_>>();
     let meta = Meta { root_addr, len };
     Ok(Fst {
       meta,
       data,
+      outputs,
 
-      _output_type: PhantomData,
       _input_type: PhantomData,
     })
   }
   pub fn get(&self, key: &[I]) -> Option<O>
   where
-    Bytes<I>: Deserialize,
-    Bytes<O>: Deserialize, {
+    Bytes<I>: Deserialize, {
     let mut node = self.root();
-    let mut out = O::zero();
+    let mut out = 0u32;
     for &b in key {
       node = node.find_input(b).map(|i| {
         let t = node.transition::<I>(i);
-        out = out.cat(&t.output);
+        out = out.cat(&t.num_out);
         self.node(t.addr)
       })?;
     }
-    if !node.is_final {
-      None
-    } else {
-      Some(out.cat(&node.final_output))
-    }
+    Some(self.outputs[out as usize])
   }
   pub fn contains_key(&self, key: &[I]) -> bool
   where
@@ -73,7 +81,7 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
     let mut node = self.root();
     for &b in key {
       let next = node.find_input(b).map(|i| {
-        let t: Transition<I, O> = node.transition::<I>(i);
+        let t: Transition<I> = node.transition::<I>(i);
         self.node(t.addr)
       });
       node = if let Some(node) = next {
@@ -82,17 +90,15 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
         return false;
       }
     }
-    node.is_final
+    true
   }
-  pub(crate) fn root(&self) -> Node<'_, O>
+  pub(crate) fn root(&self) -> Node<'_>
   where
-    Bytes<O>: Deserialize,
     Bytes<I>: Deserialize, {
     self.node(self.meta.root_addr)
   }
-  pub(crate) fn node(&self, addr: CompiledAddr) -> Node<'_, O>
+  pub(crate) fn node(&self, addr: CompiledAddr) -> Node<'_>
   where
-    Bytes<O>: Deserialize,
     Bytes<I>: Deserialize, {
     Node::new::<I>(addr, &self.data.as_ref())
   }
@@ -107,12 +113,12 @@ impl<I, O> Fst<Vec<u8>, I, O> {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct Transition<I, O> {
+pub struct Transition<I> {
   /// Input value associated with this transition
   // TODO convert this into a parametrized type for larger input values
   pub input: I,
-  /// Output value associated with this transition
-  pub output: O,
+  // just a count of the number of values associated with this transition
+  pub num_out: u32,
   /// Where is the next node from this transition
   pub addr: CompiledAddr,
 }

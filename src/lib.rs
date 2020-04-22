@@ -33,4 +33,4 @@ pub mod dense;
 #[macro_use]
 extern crate quickcheck;
 #[cfg(test)]
-mod unit_tests;
+mod tests;

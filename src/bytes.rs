@@ -144,7 +144,9 @@ impl Pack<u16> {
 impl Pack<u32> {
   pub fn size(self) -> u8 {
     let n = self.0;
-    if n < 1 << 8 {
+    if n == 0 {
+      0
+    } else if n < 1 << 8 {
       1
     } else if n < 1 << 16 {
       2
@@ -159,7 +161,9 @@ impl Pack<u32> {
 impl Pack<u64> {
   pub fn size(self) -> u8 {
     let n = self.0;
-    if n < 1 << 8 {
+    if n == 0 {
+      0
+    } else if n < 1 << 8 {
       1
     } else if n < 1 << 16 {
       2

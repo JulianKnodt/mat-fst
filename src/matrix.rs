@@ -93,7 +93,7 @@ where
 {
   pub fn hadamard<'a>(&'a self, o: &'a Self) -> Matrix<Vec<u8>, I, O, N>
   where
-    [(O, usize, Node<'a, O>); N]: LengthAtMost32, {
+    [(u32, usize, Node<'a>); N]: LengthAtMost32, {
     assert_eq!(self.shape(), o.shape());
     let mut a = self.iter();
     let mut b = self.iter().peekable();
@@ -133,7 +133,7 @@ where
   }
   pub fn transpose<'a>(&'a self) -> Matrix<Vec<u8>, I, O, N>
   where
-    [(O, usize, Node<'a, O>); N]: LengthAtMost32, {
+    [(u32, usize, Node<'a>); N]: LengthAtMost32, {
     let mut inv_items = Vec::with_capacity(self.data.len());
     inv_items.extend(self.iter().map(|(mut i, o)| {
       i.reverse();
@@ -172,7 +172,7 @@ where
     if rhs.data.is_empty() || self.data.is_empty() {
       // handle simple case where
       let dims = [self.shape()[0], rhs.shape()[1]];
-      let mut out = Builder::memory().unwrap();
+      let mut out: Builder<_, _, _, 2> = Builder::memory().unwrap();
       let data = out.into_fst();
       return Matrix { dims, data };
     }
@@ -187,7 +187,7 @@ where
   pub fn matmul_buf<'a, D2, DOut>(
     &'a self,
     rhs_t: &'a Matrix<D2, I, O, 2>,
-    out: &mut Builder<DOut, I, O>,
+    out: &mut Builder<DOut, I, O, 2>,
   ) where
     D2: AsRef<[u8]>,
     DOut: AsRef<[u8]> + std::io::Write, {
@@ -418,7 +418,7 @@ where
 {
   pub fn to_coo<'a>(&'a self) -> COO<I, O, N>
   where
-    [(O, usize, Node<'a, O>); N]: LengthAtMost32, {
+    [(u32, usize, Node<'a>); N]: LengthAtMost32, {
     COO::from_iter(self.dims, self.iter())
   }
 }
