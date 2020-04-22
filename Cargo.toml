@@ -22,6 +22,10 @@ name = "benchmarks"
 harness = false
 
 [[bench]]
+name = "comparison"
+harness = false
+
+[[bench]]
 name = "par_benchmarks"
 harness = false
 required-features = ["parallel"]

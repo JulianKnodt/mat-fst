@@ -175,15 +175,18 @@ where
   Bytes<O>: Serialize,
 {
   pub fn memory() -> Result<Self, I> { Builder::new(Vec::with_capacity(10240)) }
-  pub fn into_fst(self) -> Fst<Vec<u8>, I, O> {
-    self
-      .into_inner()
-      .map(|mut v| {
-        v.shrink_to_fit();
-        v
-      })
-      .and_then(Fst::new)
-      .unwrap()
+  pub fn from_buffer(mut v: Vec<u8>) -> Result<Self, I> {
+    v.clear();
+    Builder::new(v)
+  }
+  pub fn reset(&mut self) {
+    self.wtr.reset();
+    self.unfinished.0.clear();
+    self.registry.clear();
+    self.last = None;
+    self.last_addr = INVALID_ADDRESS;
+    self.len = 0;
+    Bytes(MAGIC_NUMBER).write_le(&mut self.wtr).unwrap();
   }
 }
 
@@ -208,6 +211,11 @@ where
       last_addr: INVALID_ADDRESS,
       len: 0,
     })
+  }
+  pub fn into_fst(self) -> Fst<W, I, O>
+  where
+    W: AsRef<[u8]>, {
+    self.into_inner().and_then(Fst::new).unwrap()
   }
   pub fn insert<K: AsRef<[I]>>(&mut self, key: K, o: O) -> Result<(), I> {
     let key = key.as_ref();

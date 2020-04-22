@@ -16,7 +16,7 @@ where
   [I; N]: LengthAtMost32, {
   // row, col, etc
   pub dims: [I; N],
-  pub(crate) data: Fst<D, I, O>,
+  pub data: Fst<D, I, O>,
 }
 
 impl<I, O, const N: usize> Matrix<Vec<u8>, I, O, N>
@@ -71,7 +71,7 @@ where
     );
     let rows = self.dims[0].as_usize();
     assert!(
-      rows <= out.len(),
+      out.len() >= rows,
       "Dimension mismatch, expected output of size {}",
       self.dims[0]
     );
@@ -79,12 +79,6 @@ where
       let y = y.as_usize();
       out[y] = out[y] + v * vec[x.as_usize()];
     });
-    /*
-    self.iter().for_each(|([y, x], v)| {
-      let y = y.as_usize();
-      out[y] = out[y] + v * vec[x.as_usize()];
-    });
-    */
   }
 }
 
@@ -176,20 +170,27 @@ where
       "Mismatched matmul dimensions"
     );
     if rhs.data.is_empty() || self.data.is_empty() {
+      // handle simple case where
       let dims = [self.shape()[0], rhs.shape()[1]];
       let mut out = Builder::memory().unwrap();
       let data = out.into_fst();
       return Matrix { dims, data };
     }
     let rhs_t = rhs.transpose();
-    self.matmul_pretransposed(&rhs_t)
+    let mut buffer = Builder::memory().unwrap();
+    self.matmul_buf(&rhs_t, &mut buffer);
+    let data = buffer.into_fst();
+    let dims = [self.shape()[0], rhs.shape()[1]];
+    return Matrix { dims, data };
   }
-  pub fn matmul_pretransposed<'a, D2>(
+  /// Writes the output of matrix multiplication into out
+  pub fn matmul_buf<'a, D2, DOut>(
     &'a self,
     rhs_t: &'a Matrix<D2, I, O, 2>,
-  ) -> Matrix<Vec<u8>, I, O, 2>
-  where
-    D2: AsRef<[u8]>, {
+    out: &mut Builder<DOut, I, O>,
+  ) where
+    D2: AsRef<[u8]>,
+    DOut: AsRef<[u8]> + std::io::Write, {
     assert_eq!(
       self.shape()[1],
       rhs_t.shape()[1],
@@ -198,10 +199,8 @@ where
     let rows = self.shape()[0];
     let cols = rhs_t.shape()[0];
     let dims = [rows, cols];
-    let mut out = Builder::memory().unwrap();
     if rhs_t.data.is_empty() || self.data.is_empty() {
-      let data = out.into_fst();
-      return Matrix { dims, data };
+      return;
     }
     // iterating over in row order
     let mut a = self.iter().peekable();
@@ -226,7 +225,6 @@ where
       acc = acc * row_buf[y.as_usize()];
       for ([x, y], o) in b {
         assert!(x >= curr_x);
-        // println!("{:?} {}", [x, y], curr_x);
         if x > curr_x {
           if !acc.is_zero() {
             out.insert([curr_row, curr_x], acc);
@@ -244,9 +242,6 @@ where
       // go on to next row
       curr_row = curr_row + I::one();
     }
-    let dims = [rows, cols];
-    let data = out.into_fst();
-    Matrix { dims, data }
   }
   /// Convolves this matrix row-wise by the kernel
   /// To convolve columnwise, transpose this matrix then convolve.

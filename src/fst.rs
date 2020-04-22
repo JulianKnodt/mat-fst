@@ -101,6 +101,11 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
   pub(crate) fn nbytes(&self) -> usize { self.data.as_ref().len() }
 }
 
+impl<I, O> Fst<Vec<u8>, I, O> {
+  #[inline]
+  pub fn recycle(self) -> Vec<u8> { self.data }
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Transition<I, O> {
   /// Input value associated with this transition

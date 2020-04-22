@@ -3,7 +3,7 @@
 
 extern crate num;
 
-mod build;
+pub mod build;
 mod bytes;
 mod counting_writer;
 mod error;
