@@ -181,7 +181,7 @@ where
     self.matmul_buf(&rhs_t, &mut buffer);
     let data = buffer.into_fst();
     let dims = [self.shape()[0], rhs.shape()[1]];
-    return Matrix { dims, data };
+    Matrix { dims, data }
   }
   /// Writes the output of matrix multiplication into out
   pub fn matmul_buf<'a, D2, DOut>(
@@ -219,7 +219,7 @@ where
         assert!(a.next().is_some());
         row_buf[x.as_usize()] = o;
       }
-      let mut b = rhs_t.pred(|p| !p.is_empty() && !row_buf[p[0].as_usize()].is_zero());
+      let mut b = rhs_t.iter();
       // iterate through columns of b
       let ([mut curr_x, y], mut acc) = b.next().unwrap();
       acc = acc * row_buf[y.as_usize()];

@@ -65,17 +65,6 @@ pub fn low_nnz_conv(c: &mut Criterion) {
   });
 }
 
-pub fn low_nnz_matmul(c: &mut Criterion) {
-  let mat = load_matrix(0.05);
-  let mut buf = Builder::memory().unwrap();
-  c.bench_function("convolve 5x5 kernel low nnz", |b| {
-    b.iter(|| {
-      mat.matmul_buf(&mat, &mut buf);
-      buf.reset();
-    })
-  });
-}
-
 pub fn high_nnz(c: &mut Criterion) {
   let mat = load_matrix(TEN_P_THRESH);
   let vec = [FiniteFloat::new(1.0); 512];
@@ -90,6 +79,6 @@ pub fn high_nnz(c: &mut Criterion) {
 criterion_group! {
   name = benches;
   config = Criterion::default().warm_up_time(Duration::from_secs(8));
-  targets = low_nnz, high_nnz, low_nnz_conv, low_nnz_matmul,
+  targets = low_nnz, high_nnz, low_nnz_conv,
 }
 criterion_main!(benches);

@@ -117,7 +117,11 @@ pub struct Transition<I, O> {
   pub addr: CompiledAddr,
 }
 
-pub(crate) fn u64_to_usize(v: u64) -> usize {
+#[cfg(target_pointer_width = "64")]
+pub(crate) const fn u64_to_usize(v: u64) -> usize { v as usize }
+
+#[cfg(target_pointer_width = "32")]
+pub(crate) const fn u64_to_usize(v: u64) -> usize {
   use std::convert::TryInto;
   v.try_into().unwrap()
 }

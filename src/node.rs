@@ -29,13 +29,12 @@ where
     if self.transitions.is_empty() && self.is_final && self.final_output.is_zero() {
       Ok(())
     } else if self.transitions.len() != 1 || self.is_final {
-      StateAnyTrans::compile(dst, addr, &self)
+      StateAnyStriated::compile(dst, addr, &self)
     } else {
       let t = &self.transitions[0];
       if !self.is_final && t.addr == last_addr && t.output.is_zero() {
         StateOneTransNext::compile(dst, addr, t.input)
       } else {
-        // TODO check if this is cloning t
         StateOneTrans::compile(dst, addr, *t)
       }
     }
@@ -106,7 +105,7 @@ where
           is_final: s.is_final(),
           num_trans,
           sizes,
-          final_output: s.final_output::<I, O>(data, sizes, num_trans),
+          final_output: O::zero(),
         }
       },
     }
@@ -145,11 +144,11 @@ where
           s.trans_addr::<I, O>(self),
         )
       },
-      State::AnyTrans(s) => (
-        s.input(self, i),
-        s.output::<I, O>(self, i),
-        s.trans_addr::<I, O>(self, i),
-      ),
+      State::AnyTrans(s) => return s.transition(&self, i), /* (
+                                                             s.input(self, i),
+                                                             s.output::<I, O>(self, i),
+                                                             s.trans_addr::<I, O>(self, i),
+                                                           ), */
     };
     Transition {
       input,
@@ -160,7 +159,9 @@ where
   // Returns which # input/transition this byte is if it exists or none otherwise
   pub(crate) fn find_input<I: Input>(&self, b: I) -> Option<usize>
   where
-    Bytes<I>: Deserialize, {
+    Bytes<I>: Deserialize,
+    Bytes<O>: Deserialize,
+    {
     match self.state {
       State::EmptyFinal => None,
 
@@ -170,7 +171,13 @@ where
       State::OneTrans(s) if s.input::<I, O>(self) == b => Some(0),
       State::OneTrans(_) => None,
 
-      State::AnyTrans(s) => s.find_input(self, b),
+      // State::AnyTrans(s) => todo!(), //s.find_input(self, b),
+      // striated version
+      State::AnyTrans(s) => s.trans_iter::<I, O>(self)
+        .enumerate()
+        .find(|(_, t)| t.input >= b)
+        .filter(|(_, t)| t.input == b)
+        .map(|v| v.0)
     }
   }
   /// Returns the range of inputs from start to end inclusive.
@@ -186,7 +193,7 @@ where
       State::OneTrans(s) if range.contains(&s.input::<I, O>(self)) => 0..1,
       State::OneTrans(_) => 0..0,
 
-      State::AnyTrans(s) => s.find_input_range(self, range),
+      State::AnyTrans(s) => todo!(), // s.find_input_range(self, range),
     }
   }
   pub fn trans_iter<'a, I: Input + 'a>(
@@ -210,7 +217,11 @@ pub(crate) enum State {
   // 1 trans | !next | common input
   OneTrans(StateOneTrans),
   // !1 trans | ?final | # transitions
-  AnyTrans(StateAnyTrans),
+  // AnyTrans(StateAnyTrans),
+
+  // !trans | ?final | # transitions
+  // striates data instead of keeping separate per each for faster iteration hopefully
+  AnyTrans(StateAnyStriated),
   EmptyFinal,
 }
 
@@ -235,7 +246,7 @@ impl State {
     match (v & TRANS_NEXT_MASK) >> 6 {
       TRANS_AND_NEXT => State::OneTransNext(StateOneTransNext(v)),
       TRANS_NOT_NEXT => State::OneTrans(StateOneTrans(v)),
-      _ => State::AnyTrans(StateAnyTrans(v)),
+      _ => State::AnyTrans(StateAnyStriated(v)),
     }
   }
 }
@@ -251,16 +262,14 @@ impl StateOneTransNext {
     Ok(())
   }
   const fn input_len<I: Input>(self) -> usize { size_of::<I>() }
-  const fn end_addr<I: Input>(self, data: &[u8]) -> usize { data.len() - 1 - self.input_len::<I>() }
+  const fn end_addr<I: Input>(self, data: &[u8]) -> usize { data.len() - 1 - size_of::<I>() }
   fn input<I: Input, O>(self, node: &Node<'_, O>) -> I
   where
     Bytes<I>: Deserialize, {
-    Bytes::read_le(
-      &mut &node.data[node.start - self.input_len::<I>()..],
-      self.input_len::<I>() as u8,
-    )
-    .unwrap()
-    .inner()
+    let ibytes = size_of::<I>();
+    Bytes::read_le(&mut &node.data[node.start - ibytes..], ibytes as u8)
+      .unwrap()
+      .inner()
     // node.data[node.start - 1]
   }
   const fn trans_addr<O>(self, node: &Node<'_, O>) -> CompiledAddr { node.end - 1 }
@@ -393,9 +402,7 @@ impl StateAnyTrans {
       },
     );
     let obytes = if any_outs { obytes } else { 0 };
-    let mut iosize = IOSize::new();
-    iosize.set_output_bytes(obytes);
-    iosize.set_transition_bytes(tbytes);
+    let iosize = IOSize::sizes(obytes, tbytes);
     let mut state = StateAnyTrans::new();
     if node.is_final {
       state.set_final();
@@ -404,6 +411,7 @@ impl StateAnyTrans {
     if any_outs {
       if node.is_final {
         // TODO make this packed
+        assert!(node.final_output.is_zero());
         Bytes(node.final_output).write_le(&mut wtr)?;
       }
       for t in node.transitions.iter().rev() {
@@ -628,6 +636,190 @@ impl StateAnyTrans {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StateAnyStriated(u8);
+
+impl StateAnyStriated {
+  const fn new() -> Self { Self(0b00_000000) }
+  fn compile<W: Write, I: Input, O: Output>(
+    mut wtr: W,
+    addr: CompiledAddr,
+    node: &BuilderNode<I, O>,
+  ) -> io::Result<()>
+  where
+    Bytes<O>: Serialize,
+    Bytes<I>: Serialize, {
+    assert!(node.transitions.len() <= I::max_value().as_usize());
+    let mut sink = io::sink();
+    let obytes_init = Bytes(node.final_output).write_le(&mut sink).unwrap();
+    let (tbytes, obytes, any_outs) = node.transitions.iter().fold(
+      (0, obytes_init, !node.final_output.is_zero()),
+      |(tbytes, obytes, any_outs), trans| {
+        let next_tsize = Pack(delta(addr, trans.addr)).size();
+        (
+          tbytes.max(next_tsize),
+          obytes.max(Bytes(trans.output).write_le(&mut sink).unwrap()),
+          any_outs || !trans.output.is_zero(),
+        )
+      },
+    );
+    let obytes = if any_outs { obytes } else { 0 };
+    let iosize = IOSize::sizes(obytes, tbytes);
+    let mut state = StateAnyStriated::new();
+    if node.is_final {
+      state.set_final();
+    }
+    state.set_state_num_trans(node.transitions.len());
+    // I'm just being lazy here
+    assert!(node.final_output.is_zero());
+    for t in node.transitions.iter() {
+      let &Transition { input, output, .. } = t;
+      Bytes(input).write_le(&mut wtr)?;
+      if obytes != 0 {
+        assert_eq!(obytes, Bytes(output).write_le(&mut wtr)?);
+      }
+      let t_written = Bytes(PackTo(delta(addr, t.addr), tbytes)).write_le(&mut wtr)?;
+      assert_eq!(t_written, tbytes);
+    }
+    Bytes(iosize.encode()).write_le(&mut wtr)?;
+    if state.state_num_trans().is_none() {
+      assert_ne!(node.transitions.len(), 0, "UNREACHABLE 0 encoded in state");
+      let s = I::from_usize(node.transitions.len() - 1);
+      Bytes(s).write_le(&mut wtr)?;
+      assert_ne!(state.num_trans_len::<I>(), 0);
+    } else {
+      assert_eq!(state.num_trans_len::<I>(), 0);
+    }
+    Bytes(state.0).write_le(&mut wtr)?;
+    Ok(())
+  }
+  fn set_final(&mut self) { self.0 |= 0b01_000000; }
+  const fn is_final(self) -> bool { self.0 & 0b01_000000 != 0 }
+  fn sizes<I: Input>(self, data: &[u8]) -> IOSize {
+    let i = data.len() - 1 - self.num_trans_len::<I>() - 1;
+    IOSize::decode(data[i])
+  }
+  /// Attempts to encode number of transitions in the state
+  fn set_state_num_trans(&mut self, n: usize) -> bool {
+    if n >= 256 {
+      return false;
+    }
+    let n = (n as u8).saturating_add(1);
+    if n <= !0b11_000000 {
+      self.0 = (self.0 & 0b11_000000) | n;
+      return true;
+    }
+    false
+  }
+  /// Number of transitions encoded into the state
+  /// If it is 0 it implies that the number of transitions is encoded elsewhere
+  fn state_num_trans(self) -> Option<u8> {
+    let n = self.0 & !0b11_000000;
+    Some(n).filter(|&n| n != 0).map(|n| n - 1)
+  }
+  // returns the size of the encoded number of transitions
+  fn num_trans_len<I: Input>(self) -> usize {
+    if self.state_num_trans().is_none() {
+      size_of::<I>()
+    } else {
+      0
+    }
+  }
+  // returns the number of transitions for a given amt of data
+  fn num_trans<I: Input>(self, data: &[u8]) -> usize
+  where
+    Bytes<I>: Deserialize, {
+    if let Some(n) = self.state_num_trans() {
+      return n as usize;
+    }
+    let input_len = size_of::<I>();
+    Bytes::<I>::read_le(&mut &data[data.len() - 1 - input_len..], input_len as u8)
+      .unwrap()
+      .inner()
+      .as_usize()
+      + 1
+  }
+  fn end_addr<I: Input>(self, data: &[u8], sizes: IOSize, num_trans: usize) -> CompiledAddr {
+    let obytes = sizes.output_bytes();
+    let tbytes = sizes.transition_bytes();
+    let trans_size = size_of::<I>() + obytes + tbytes;
+    data.len()
+      - 1
+      - self.num_trans_len::<I>()
+      - 1 // IOSize
+      - num_trans * trans_size
+  }
+  /// gets the ith transition of this node
+  pub fn transition<I: Input, O: Output>(self, node: &Node<'_, O>, i: usize) -> Transition<I, O>
+  where
+    Bytes<O>: Deserialize,
+    Bytes<I>: Deserialize, {
+    let obytes = node.sizes.output_bytes();
+    let tbytes = node.sizes.transition_bytes();
+    let ibytes = size_of::<I>();
+    let trans_size = ibytes + obytes + tbytes;
+    let mut at = node.end + trans_size * i;
+    let input = Bytes::<I>::read_le(&mut &node.data[at..], ibytes as u8)
+      .unwrap()
+      .inner();
+    at += ibytes;
+    let output = if obytes == 0 {
+      O::zero()
+    } else {
+      Bytes::<O>::read_le(&mut &node.data[at..], obytes as u8)
+        .unwrap()
+        .inner()
+    };
+    at += obytes;
+    let addr = if tbytes == 0 {
+      END_ADDRESS
+    } else {
+      let delta = Bytes::<u64>::read_le(&mut &node.data[at..], tbytes as u8)
+        .unwrap()
+        .inner();
+      undo_delta(node.end, delta)
+    };
+    Transition {
+      input,
+      output,
+      addr,
+    }
+  }
+  pub fn trans_iter<'a, I: Input, O: Output>(
+    self,
+    node: &'a Node<'_, O>,
+  ) -> impl Iterator<Item = Transition<I, O>> + 'a
+  where
+    Bytes<O>: Deserialize,
+    Bytes<I>: Deserialize, {
+    let obytes = node.sizes.output_bytes();
+    let tbytes = node.sizes.transition_bytes();
+    let ibytes = size_of::<I>();
+    let trans_size = ibytes + obytes + tbytes;
+    let mut at = node.end;
+    (0..node.num_trans).map(move |_| {
+      let input = Bytes::<I>::read_le(&mut &node.data[at..], ibytes as u8)
+        .unwrap()
+        .inner();
+      at += ibytes;
+      let output = Bytes::<O>::read_le(&mut &node.data[at..], obytes as u8)
+        .unwrap()
+        .inner();
+      at += obytes;
+      let delta = Bytes::<u64>::read_le(&mut &node.data[at..], tbytes as u8)
+        .unwrap()
+        .inner();
+      at += tbytes;
+      let addr = undo_delta(node.end, delta);
+      Transition {
+        input,
+        output,
+        addr,
+      }
+    })
+  }
+}
+
 /// IOSize represents the input output size for a given node.
 /// 4 Transition Addr Size | 4 Output Size | 1 Input Size
 /// Ranges of values: [1, 8] | [0, 8] |1, 2]
@@ -639,6 +831,12 @@ impl IOSize {
   const TRANS_MASK: u8 = 0b1111_0000;
   const OUT_MASK: u8 = 0b000_1111;
   const fn new() -> Self { Self(0) }
+  fn sizes(obytes: u8, tbytes: u8) -> Self {
+    let mut out = Self::new();
+    out.set_output_bytes(obytes);
+    out.set_transition_bytes(tbytes);
+    out
+  }
   fn set_transition_bytes(&mut self, size: u8) {
     assert!(size <= 8, "Cannot encode transition larger than 8 bytes");
     self.0 = (self.0 & !IOSize::TRANS_MASK) | (size << 4);
@@ -675,6 +873,7 @@ mod iosize_tests {
 
 /// Returns the necessary amount to go from trans address to node address
 // TODO also return packed size of both addresses here
+#[inline]
 fn delta(node_addr: CompiledAddr, trans_addr: CompiledAddr) -> usize {
   if trans_addr == END_ADDRESS {
     END_ADDRESS
@@ -686,7 +885,6 @@ fn delta(node_addr: CompiledAddr, trans_addr: CompiledAddr) -> usize {
 /// Takes an address for a node and some delta to a transition and returns that transitions
 /// address, or END_ADDRESS if there is no transition
 fn undo_delta(node_addr: CompiledAddr, delta: u64) -> CompiledAddr {
-  // TODO check that this properly works
   let delta: usize = u64_to_usize(delta);
   if delta == END_ADDRESS {
     END_ADDRESS

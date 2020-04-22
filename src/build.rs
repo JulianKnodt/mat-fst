@@ -80,6 +80,10 @@ impl<I: Input, O: Output> PartialNodes<I, O> {
     partials.push_empty(false);
     partials
   }
+  fn reset(&mut self) {
+    self.0.clear();
+    self.push_empty(false);
+  }
   fn len(&self) -> usize { self.0.len() }
   fn push_empty(&mut self, is_final: bool) {
     self.0.push(PartialNode {
@@ -181,7 +185,7 @@ where
   }
   pub fn reset(&mut self) {
     self.wtr.reset();
-    self.unfinished.0.clear();
+    self.unfinished.reset();
     self.registry.clear();
     self.last = None;
     self.last_addr = INVALID_ADDRESS;
