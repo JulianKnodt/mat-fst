@@ -160,8 +160,7 @@ where
   pub(crate) fn find_input<I: Input>(&self, b: I) -> Option<usize>
   where
     Bytes<I>: Deserialize,
-    Bytes<O>: Deserialize,
-    {
+    Bytes<O>: Deserialize, {
     match self.state {
       State::EmptyFinal => None,
 
@@ -173,11 +172,12 @@ where
 
       // State::AnyTrans(s) => todo!(), //s.find_input(self, b),
       // striated version
-      State::AnyTrans(s) => s.trans_iter::<I, O>(self)
+      State::AnyTrans(s) => s
+        .trans_iter::<I, O>(self)
         .enumerate()
         .find(|(_, t)| t.input >= b)
         .filter(|(_, t)| t.input == b)
-        .map(|v| v.0)
+        .map(|v| v.0),
     }
   }
   /// Returns the range of inputs from start to end inclusive.

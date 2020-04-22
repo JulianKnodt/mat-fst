@@ -134,8 +134,8 @@ where
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TransmutedF32(u32);
 impl TransmutedF32 {
-  pub fn new(v: f32) -> Self { Self(unsafe { transmute(v) }) }
-  pub fn v(&self) -> f32 { unsafe { transmute(self.0) } }
+  pub fn new(v: f32) -> Self { Self(v.to_bits()) }
+  pub fn v(&self) -> f32 { f32::from_bits(self.0) }
 }
 impl Zero for TransmutedF32 {
   fn zero() -> Self { Self::new(0.0) }
