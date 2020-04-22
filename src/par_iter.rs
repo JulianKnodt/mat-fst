@@ -12,9 +12,9 @@ where
   [I; N]: LengthAtMost32,
   [I; P]: LengthAtMost32, {
   matrix: &'f Matrix<D, I, O, N>,
-  node: Node<'f, O>,
+  node: Node<'f>,
   /// The current output value
-  curr_out: O,
+  curr_out: u32,
 }
 
 // TODO this really should be N, N-1, but waiting for const-generics to be stabilized
@@ -40,7 +40,7 @@ where
       .into_par_iter()
       .map(move |i| {
         let t = node.transition(i);
-        (t.input, curr_out.cat(&t.output))
+        (t.input, self.matrix.data.outputs[curr_out.cat(&t.num_out) as usize])
       })
       .drive_unindexed(consumer)
   }
@@ -74,7 +74,7 @@ where
         let iter = ParSliceIter {
           matrix: &self.matrix,
           node: next_node,
-          curr_out: curr_out.cat(&t.output),
+          curr_out: curr_out.cat(&t.num_out),
         };
         (t.input, iter)
       })
@@ -97,7 +97,7 @@ where
     ParSliceIter {
       matrix: self,
       node: self.data.root(),
-      curr_out: O::zero(),
+      curr_out: 0,
     }
   }
 }
