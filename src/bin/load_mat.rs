@@ -39,4 +39,7 @@ fn main() {
   println!("mat len {}", mat.count_nonzero());
   println!("mat shape {:?}", mat.shape());
   println!("mat bytes {}", mat.nbytes());
+  let csr = mat.to_coo().to_csr();
+  println!("csr bytes {}", csr.nbytes());
+  println!("csr nnz {}", csr.count_nonzero());
 }

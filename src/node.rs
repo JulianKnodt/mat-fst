@@ -116,6 +116,7 @@ fn is_range_iter<V: Iterator<Item = u32>>(mut vs: V) -> bool {
 pub struct Striated(u8);
 
 const RANGE_MASK: u8 = 0b1000_0000;
+const SIZE_MASK: u8 = 0b0110_0000;
 impl Striated {
   const fn new() -> Self { Self(0b00_000000) }
   fn compile<W: Write, I: Input>(
@@ -124,18 +125,20 @@ impl Striated {
     node: &BuilderNode<I>,
   ) -> io::Result<()>
   where
-    Bytes<I>: Serialize, {
+    Bytes<I>: Serialize,
+    Bytes<I>: Serialize {
     assert!(node.transitions.len() <= I::max_value().as_usize());
     let mut sink = io::sink();
-    let (tbytes, obytes, any_outs) =
+    let (ibytes, tbytes, obytes, any_outs) =
       node
         .transitions
         .iter()
-        .fold((0, 0, false), |(tbytes, obytes, any_outs), trans| {
+        .fold((0, 0, 0, false), |(ibytes, tbytes, obytes, any_outs), trans| {
           let next_tsize = Pack(delta(addr, trans.addr)).size();
           (
+            ibytes.max(Bytes(trans.input).pack(&mut sink).unwrap()),
             tbytes.max(next_tsize),
-            obytes.max(Bytes(Pack(trans.num_out)).write_le(&mut sink).unwrap()),
+            obytes.max(Bytes(trans.num_out).pack(&mut sink).unwrap()),
             any_outs || trans.num_out > 0,
           )
         });
@@ -143,34 +146,24 @@ impl Striated {
     let obytes = if !is_range && any_outs { obytes } else { 0 };
     let iosize = IOSize::sizes(obytes, tbytes);
     let mut state = Self::new();
-
+    state.set_input_bytes(ibytes);
     if is_range {
       assert_eq!(node.transitions[0].num_out, 0);
       state.set_range();
     }
-    state.set_state_num_trans(node.transitions.len());
     for t in node.transitions.iter().rev() {
       let &Transition { input, num_out, .. } = t;
-      Bytes(input).write_le(&mut wtr)?;
+      Bytes(input).pack_to(ibytes, &mut wtr)?;
       if !is_range {
-        assert_eq!(obytes, Bytes(PackTo(num_out, obytes)).write_le(&mut wtr)?);
+        Bytes(num_out).pack_to(obytes, &mut wtr)?;
       }
-      let t_written = Bytes(PackTo(delta(addr, t.addr), tbytes)).write_le(&mut wtr)?;
-      assert_eq!(t_written, tbytes);
+      Bytes(delta(addr, t.addr)).pack_to(tbytes, &mut wtr)?;
     }
     Bytes(iosize.encode()).write_le(&mut wtr)?;
-    if state.state_num_trans().is_none() {
-      assert_ne!(
-        node.transitions.len(),
-        0,
-        "UNREACHABLE 0 should be encoded in state"
-      );
-      let s = I::from_usize(node.transitions.len() - 1);
-      Bytes(s).write_le(&mut wtr)?;
-      assert_ne!(state.num_trans_len::<I>(), 0);
-    } else {
-      assert_eq!(state.num_trans_len::<I>(), 0);
-    }
+    // we should never encode 0 transitions
+    debug_assert_ne!(node.transitions.len(), 0);
+    let s = I::from_usize(node.transitions.len() - 1);
+    Bytes(s).pack_to(ibytes, &mut wtr)?;
     Bytes(state.0).write_le(&mut wtr)?;
     Ok(())
   }
@@ -178,40 +171,13 @@ impl Striated {
     let i = data.len() - 1 - self.num_trans_len::<I>() - 1;
     IOSize::decode(data[i])
   }
-  /// Attempts to encode number of transitions in the state
-  fn set_state_num_trans(&mut self, n: usize) -> bool {
-    if n >= 256 {
-      return false;
-    }
-    let n = (n as u8).saturating_add(1);
-    if n <= !0b11_000000 {
-      self.0 = (self.0 & 0b11_000000) | n;
-      return true;
-    }
-    false
-  }
-  /// Number of transitions encoded into the state
-  /// If it is 0 it implies that the number of transitions is encoded elsewhere
-  fn state_num_trans(self) -> Option<u8> {
-    let n = self.0 & !0b11_000000;
-    Some(n).filter(|&n| n != 0).map(|n| n - 1)
-  }
   // returns the size of the encoded number of transitions
-  fn num_trans_len<I: Input>(self) -> usize {
-    if self.state_num_trans().is_none() {
-      size_of::<I>()
-    } else {
-      0
-    }
-  }
+  const fn num_trans_len<I: Input>(self) -> usize { self.input_bytes() }
   // returns the number of transitions for a given amt of data
   fn num_trans<I: Input>(self, data: &[u8]) -> usize
   where
     Bytes<I>: Deserialize, {
-    if let Some(n) = self.state_num_trans() {
-      return n as usize;
-    }
-    let input_len = size_of::<I>();
+    let input_len = self.input_bytes();
     Bytes::<I>::read_le(&mut &data[data.len() - 1 - input_len..], input_len as u8)
       .unwrap()
       .inner()
@@ -219,7 +185,7 @@ impl Striated {
       + 1
   }
   fn end_addr<I: Input>(self, data: &[u8], sizes: IOSize, num_trans: usize) -> CompiledAddr {
-    let trans_size = size_of::<I>() + sizes.output_bytes() + sizes.transition_bytes();
+    let trans_size = self.input_bytes() + sizes.output_bytes() + sizes.transition_bytes();
     data.len()
       - 1
       - self.num_trans_len::<I>()
@@ -229,13 +195,19 @@ impl Striated {
   /// Used to denote that the input is repeating by some frequency
   fn set_range(&mut self) { self.0 |= RANGE_MASK; }
   const fn is_range(self) -> bool { self.0 & RANGE_MASK == RANGE_MASK }
+  fn set_input_bytes(&mut self, size: u8) {
+    assert!(size < 4);
+    // assert!(size > 0, "Encoding one transition of size 0");
+    self.0 |= (size << 5) & SIZE_MASK;
+  }
+  const fn input_bytes(self) -> usize { ((self.0 & SIZE_MASK) >> 5) as usize }
   /// gets the ith transition of this node
   pub fn transition<I: Input>(self, node: &Node<'_>, i: usize) -> Transition<I>
   where
     Bytes<I>: Deserialize, {
     let obytes = node.sizes.output_bytes();
     let tbytes = node.sizes.transition_bytes();
-    let ibytes = size_of::<I>();
+    let ibytes = self.input_bytes();
     let trans_size = ibytes + obytes + tbytes;
     let mut at = node.data.len()
       - 1
@@ -265,7 +237,7 @@ impl Striated {
     Bytes<I>: Deserialize, {
     let obytes = node.sizes.output_bytes();
     let tbytes = node.sizes.transition_bytes();
-    let ibytes = size_of::<I>();
+    let ibytes = self.input_bytes();
     let trans_size = ibytes + obytes + tbytes;
     let mut at = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
     let is_range = self.is_range();

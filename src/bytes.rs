@@ -10,6 +10,8 @@ use std::{
 pub trait Serialize: Sized {
   /// Returns the number of bytes written on serialization
   fn write_le<W: Write>(self, dst: &mut W) -> io::Result<u8>;
+  fn pack<W: Write>(self, dst: &mut W) -> io::Result<u8> { todo!() }
+  fn pack_to<W: Write>(self, size: u8, dst: &mut W) -> io::Result<()> { todo!() }
 }
 
 pub trait Deserialize: Sized {
@@ -29,22 +31,6 @@ impl<T> From<T> for Bytes<T> {
   fn from(t: T) -> Self { Bytes(t) }
 }
 
-impl Serialize for Bytes<u8> {
-  fn write_le<W: Write>(self, dst: &mut W) -> io::Result<u8> {
-    dst.write_all(&[self.0])?;
-    Ok(size_of::<u8>() as u8)
-  }
-}
-
-impl Deserialize for Bytes<u8> {
-  fn read_le<R: Read>(from: &mut R, n: u8) -> io::Result<Self> {
-    assert_eq!(n, 1);
-    let mut buf = [0; 1];
-    from.read_exact(&mut buf)?;
-    Ok(u8::from_le_bytes(buf).into())
-  }
-}
-
 macro_rules! SerDesUnsigned {
   ($u: ty) => {
     impl Serialize for Bytes<$u> {
@@ -53,32 +39,30 @@ macro_rules! SerDesUnsigned {
         dst.write_all(&bytes)?;
         Ok(size_of::<$u>() as u8)
       }
+      fn pack_to<W: Write>(self, n: u8, dst: &mut W) -> io::Result<()> {
+        let buf = self.inner().to_le_bytes();
+        dst.write_all(&buf[..n as usize])?;
+        Ok(())
+      }
+      fn pack<W: Write>(self, dst: &mut W) -> io::Result<u8> {
+        let v = self.inner();
+        let size = Pack(v).size();
+        Bytes(v).pack_to(size, dst).map(|_| size)
+      }
     }
     impl Deserialize for Bytes<$u> {
+      #[inline]
       fn read_le<R: Read>(from: &mut R, n: u8) -> io::Result<Self> {
-        assert!(n <= (size_of::<$u>() as u8));
+        debug_assert!(n <= (size_of::<$u>() as u8));
         let mut buf = [0; size_of::<$u>()];
         from.read_exact(&mut buf[..n as usize])?;
         Ok(<$u>::from_le_bytes(buf).into())
       }
     }
-    impl Serialize for Bytes<PackTo<$u>> {
-      fn write_le<W: Write>(self, dst: &mut W) -> io::Result<u8> {
-        let PackTo(v, n) = self.inner();
-        let buf = v.to_le_bytes();
-        dst.write_all(&buf[..n as usize])?;
-        Ok(n)
-      }
-    }
-    impl Serialize for Bytes<Pack<$u>> {
-      fn write_le<W: Write>(self, dst: &mut W) -> io::Result<u8> {
-        let p = self.inner();
-        Bytes(PackTo(p.0, p.size())).write_le(dst)
-      }
-    }
   };
 }
 
+SerDesUnsigned!(u8);
 SerDesUnsigned!(u16);
 SerDesUnsigned!(u32);
 SerDesUnsigned!(u64);
@@ -131,16 +115,30 @@ pub struct PackTo<T>(pub T, pub u8);
 /// used.
 #[derive(Debug, Copy, Clone)]
 pub struct Pack<T>(pub T);
+impl Pack<u8> {
+  pub fn size(self) -> u8 {
+    let n = self.0;
+    if n == 0 {
+      0
+    } else {
+      1
+    }
+  }
+}
+
 impl Pack<u16> {
   pub fn size(self) -> u8 {
     let n = self.0;
-    if n < 1 << 8 {
+    if n == 0 {
+      0
+    } else if n < 1 << 8 {
       1
     } else {
       2
     }
   }
 }
+
 impl Pack<u32> {
   pub fn size(self) -> u8 {
     let n = self.0;
@@ -197,14 +195,14 @@ mod bytes_test {
   quickcheck! {
     fn pack_serdes_u32(v: u32) -> bool {
       let mut buffer = vec![];
-      let written = Bytes(Pack(v)).write_le(&mut buffer).unwrap() as u8;
+      let written = Bytes(v).pack(&mut buffer).unwrap() as u8;
       v == Bytes::<u32>::read_le(&mut buffer.as_slice(), written).unwrap().inner()
     }
   }
   quickcheck! {
     fn pack_serdes_u64(v: u64) -> bool {
       let mut buffer = vec![];
-      let written = Bytes(Pack(v)).write_le(&mut buffer).unwrap() as u8;
+      let written = Bytes(v).pack(&mut buffer).unwrap() as u8;
       v == Bytes::<u64>::read_le(&mut buffer.as_slice(), written).unwrap().inner()
     }
   }

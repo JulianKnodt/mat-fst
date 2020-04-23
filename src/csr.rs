@@ -1,5 +1,5 @@
 use crate::{bytes::*, input::Input, matrix::Matrix, output::Output, util::within};
-use std::{array::LengthAtMost32, collections::BTreeMap, ops::Mul};
+use std::{array::LengthAtMost32, collections::BTreeMap, mem::size_of, ops::Mul};
 
 #[derive(Debug)]
 pub struct CSR<I, O> {
@@ -38,4 +38,10 @@ where
         .fold(O::zero(), |acc, (x, o)| acc + vec[x.as_usize()] * o);
     }
   }
+  pub fn nbytes(&self) -> usize {
+    self.values.len() * size_of::<O>()
+      + self.cols.len() * size_of::<I>()
+      + self.row_ptrs.len() * size_of::<usize>()
+  }
+  pub fn count_nonzero(&self) -> usize { self.values.len() }
 }
