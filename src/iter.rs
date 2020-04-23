@@ -57,10 +57,7 @@ where
         if !is_final {
           continue;
         }
-        return Some((
-          self.inputs,
-          self.matrix.data.outputs[*out as usize],
-        ));
+        return Some((self.inputs, self.matrix.data.outputs[*out as usize]));
       }
       if self.root_curr >= self.root.num_trans {
         return None;

@@ -65,19 +65,22 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
     Bytes<I>: Deserialize, {
     let mut node = self.root();
     let mut out = 0u32;
-    for &b in key {
+    for &b in &key[..key.len() - 1] {
       node = node.find_input(b).map(|i| {
         let t = node.transition::<I>(i);
         out = out.cat(&t.num_out);
         self.node(t.addr)
       })?;
     }
+    node.find_input(key[key.len() - 1]).map(|i| {
+      let t = node.transition::<I>(i);
+      out = out.cat(&t.num_out);
+    })?;
     Some(self.outputs[out as usize])
   }
   pub fn contains_key(&self, key: &[I]) -> bool
   where
-    Bytes<I>: Deserialize,
-    Bytes<O>: Deserialize, {
+    Bytes<I>: Deserialize, {
     let mut node = self.root();
     for &b in key {
       let next = node.find_input(b).map(|i| {

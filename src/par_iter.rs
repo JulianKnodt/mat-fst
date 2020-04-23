@@ -40,7 +40,10 @@ where
       .into_par_iter()
       .map(move |i| {
         let t = node.transition(i);
-        (t.input, self.matrix.data.outputs[curr_out.cat(&t.num_out) as usize])
+        (
+          t.input,
+          self.matrix.data.outputs[curr_out.cat(&t.num_out) as usize],
+        )
       })
       .drive_unindexed(consumer)
   }
