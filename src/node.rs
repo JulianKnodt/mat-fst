@@ -18,6 +18,7 @@ impl<I: Input> BuilderNode<I>
 where
   Bytes<I>: Serialize,
 {
+  #[inline]
   pub fn compile<W: io::Write>(
     &self,
     dst: &mut W,
@@ -83,17 +84,32 @@ impl<'f> Node<'f> {
     Bytes<I>: Deserialize, {
     self.state.transition(&self, i)
   }
-  // Returns which # input/transition this byte is if it exists or none otherwise
+  /// Returns which # input/transition this byte is if it exists or none otherwise
+  #[inline]
   pub(crate) fn find_input<I: Input>(&self, b: I) -> Option<usize>
   where
     Bytes<I>: Deserialize, {
     self.state.trans_iter::<I>(self).position(|t| t.input == b)
   }
+  #[inline]
   pub fn trans_iter<'a, I: Input + 'a>(&'a self) -> impl Iterator<Item = Transition<I>> + 'a
   where
     Bytes<I>: Deserialize, {
     self.state.trans_iter(&self)
   }
+}
+
+fn is_range_iter<V: Iterator<Item = u32>>(mut vs: V) -> bool {
+  let mut curr = if let Some(f) = vs.next() {
+    f
+  } else {
+    return true;
+  };
+  vs.all(|v| {
+    let ok = curr == v - 1;
+    curr = v;
+    ok
+  })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -123,14 +139,22 @@ impl Striated {
             any_outs || trans.num_out > 0,
           )
         });
-    let obytes = if any_outs { obytes } else { 0 };
+    let is_range = is_range_iter(node.transitions.iter().map(|v| v.num_out));
+    let obytes = if !is_range && any_outs { obytes } else { 0 };
     let iosize = IOSize::sizes(obytes, tbytes);
     let mut state = Self::new();
+
+    if is_range {
+      assert_eq!(node.transitions[0].num_out, 0);
+      state.set_range();
+    }
     state.set_state_num_trans(node.transitions.len());
     for t in node.transitions.iter().rev() {
       let &Transition { input, num_out, .. } = t;
       Bytes(input).write_le(&mut wtr)?;
-      assert_eq!(obytes, Bytes(PackTo(num_out, obytes)).write_le(&mut wtr)?);
+      if !is_range {
+        assert_eq!(obytes, Bytes(PackTo(num_out, obytes)).write_le(&mut wtr)?);
+      }
       let t_written = Bytes(PackTo(delta(addr, t.addr), tbytes)).write_le(&mut wtr)?;
       assert_eq!(t_written, tbytes);
     }
@@ -203,12 +227,8 @@ impl Striated {
       - num_trans * trans_size
   }
   /// Used to denote that the input is repeating by some frequency
-  fn mark_repeating_range<I: Input>(&mut self, is_ranged: bool) {
-    if is_ranged {
-      self.0 |= RANGE_MASK;
-    }
-  }
-  fn is_repeating_range<I: Input>(self) -> bool { self.0 & RANGE_MASK == RANGE_MASK }
+  fn set_range(&mut self) { self.0 |= RANGE_MASK; }
+  const fn is_range(self) -> bool { self.0 & RANGE_MASK == RANGE_MASK }
   /// gets the ith transition of this node
   pub fn transition<I: Input>(self, node: &Node<'_>, i: usize) -> Transition<I>
   where
@@ -222,23 +242,21 @@ impl Striated {
       - self.num_trans_len::<I>()
       - 1 // IOSize
       - trans_size * (i+1);
-    let input = Bytes::<I>::read_le(&mut &node.data[at..], ibytes as u8)
-      .unwrap()
-      .inner();
-    at += ibytes;
-    let num_out = Bytes::<u32>::read_le(&mut &node.data[at..], obytes as u8)
-      .unwrap()
-      .inner();
-    at += obytes;
-    let delta = Bytes::<u64>::read_le(&mut &node.data[at..], tbytes as u8)
-      .unwrap()
-      .inner();
+    let reader = &mut &node.data[at..];
+    let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+    let num_out = if self.is_range() {
+      i as u32
+    } else {
+       Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
+    };
+    let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
     Transition {
       input,
       num_out,
       addr: undo_delta(node.end, delta),
     }
   }
+  #[inline]
   pub fn trans_iter<'a, I: Input>(
     self,
     node: &'a Node<'_>,
@@ -250,11 +268,16 @@ impl Striated {
     let ibytes = size_of::<I>();
     let trans_size = ibytes + obytes + tbytes;
     let mut at = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
-    (0..node.num_trans).map(move |_| {
+    let is_range = self.is_range();
+    (0..node.num_trans).map(move |i| {
       at -= trans_size;
       let reader = &mut &node.data[at..];
       let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
-      let output = Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner();
+      let output = if is_range {
+        i as u32
+      } else {
+        Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
+      };
       let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
       let addr = undo_delta(node.end, delta);
       Transition {
