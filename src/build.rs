@@ -131,8 +131,7 @@ impl<I: Input> PartialNodes<I> {
       input: key[0],
       num_out: o,
     });
-    for i in 1..key.len() {
-      let k = key[i];
+    for (i, &k) in key.iter().enumerate().skip(1) {
       self.0.push(PartialNode {
         node: BuilderNode::new(i),
         last: Some(LastTransition {

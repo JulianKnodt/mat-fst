@@ -94,10 +94,7 @@ impl<'f> Node<'f> {
     self
       .state
       .trans_iter::<I>(self)
-      .enumerate()
-      .find(|(_, t)| t.input >= b)
-      .filter(|(_, t)| t.input == b)
-      .map(|v| v.0)
+      .position(|t| t.input == b)
   }
   pub fn trans_iter<'a, I: Input + 'a>(&'a self) -> impl Iterator<Item = Transition<I>> + 'a
   where
@@ -136,7 +133,7 @@ impl Striated {
     let iosize = IOSize::sizes(obytes, tbytes);
     let mut state = Self::new();
     state.set_state_num_trans(node.transitions.len());
-    for t in node.transitions.iter() {
+    for t in node.transitions.iter().rev() {
       let &Transition { input, num_out, .. } = t;
       Bytes(input).write_le(&mut wtr)?;
       assert_eq!(obytes, Bytes(PackTo(num_out, obytes)).write_le(&mut wtr)?);
@@ -145,7 +142,7 @@ impl Striated {
     }
     Bytes(iosize.encode()).write_le(&mut wtr)?;
     if state.state_num_trans().is_none() {
-      assert_ne!(node.transitions.len(), 0, "UNREACHABLE 0 encoded in state");
+      assert_ne!(node.transitions.len(), 0, "UNREACHABLE 0 should be encoded in state");
       let s = I::from_usize(node.transitions.len() - 1);
       Bytes(s).write_le(&mut wtr)?;
       assert_ne!(state.num_trans_len::<I>(), 0);
@@ -215,7 +212,10 @@ impl Striated {
     let tbytes = node.sizes.transition_bytes();
     let ibytes = size_of::<I>();
     let trans_size = ibytes + obytes + tbytes;
-    let mut at = node.end + trans_size * i;
+    let mut at = node.start
+      - self.num_trans_len::<I>()
+      - 1 // IOSize
+      - trans_size * (i+1);
     let input = Bytes::<I>::read_le(&mut &node.data[at..], ibytes as u8)
       .unwrap()
       .inner();
@@ -227,11 +227,10 @@ impl Striated {
     let delta = Bytes::<u64>::read_le(&mut &node.data[at..], tbytes as u8)
       .unwrap()
       .inner();
-    let addr = undo_delta(node.end, delta);
     Transition {
       input,
       num_out,
-      addr,
+      addr: undo_delta(node.end, delta),
     }
   }
   pub fn trans_iter<'a, I: Input>(
@@ -244,20 +243,22 @@ impl Striated {
     let tbytes = node.sizes.transition_bytes();
     let ibytes = size_of::<I>();
     let trans_size = ibytes + obytes + tbytes;
-    let mut at = node.end;
+    let mut at = node.start
+      - self.num_trans_len::<I>()
+      - 1;
     (0..node.num_trans).map(move |_| {
-      let input = Bytes::<I>::read_le(&mut &node.data[at..], ibytes as u8)
-        .unwrap()
-        .inner();
-      at += ibytes;
-      let output = Bytes::<u32>::read_le(&mut &node.data[at..], obytes as u8)
-        .unwrap()
-        .inner();
-      at += obytes;
+      at -= tbytes;
       let delta = Bytes::<u64>::read_le(&mut &node.data[at..], tbytes as u8)
         .unwrap()
         .inner();
-      at += tbytes;
+      at -= obytes;
+      let output = Bytes::<u32>::read_le(&mut &node.data[at..], obytes as u8)
+        .unwrap()
+        .inner();
+      at -= ibytes;
+      let input = Bytes::<I>::read_le(&mut &node.data[at..], ibytes as u8)
+        .unwrap()
+        .inner();
       let addr = undo_delta(node.end, delta);
       Transition {
         input,
