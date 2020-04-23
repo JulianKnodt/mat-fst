@@ -248,8 +248,12 @@ impl Striated {
       } else {
         Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
       };
-      let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
-      let addr = undo_delta(node.end, delta);
+      let addr = if tbytes == 0 {
+        END_ADDRESS
+      } else {
+        let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
+        undo_delta(node.end, delta)
+      };
       Transition {
         input,
         num_out: output,
@@ -272,13 +276,13 @@ impl Striated {
     let trans_size = ibytes + obytes + tbytes;
     let mut at = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
     assert!(self.is_range());
+    assert_eq!(tbytes, 0);
     (0..node.num_trans).map(move |i| {
       at -= trans_size;
       let reader = &mut &node.data[at..];
       let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
       let output = i as u32;
-      let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
-      let addr = undo_delta(node.end, delta);
+      let addr = END_ADDRESS;
       Transition {
         input,
         num_out: output,
