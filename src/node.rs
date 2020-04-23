@@ -41,8 +41,6 @@ pub struct Node<'a> {
   // TODO make this state into one byte?
   // currently it occupies two because we have a byte inside an enum
   pub(crate) state: Striated,
-  // TODO condense these because they are some what redundant
-  start: CompiledAddr,
   end: CompiledAddr,
   pub(crate) num_trans: usize,
   sizes: IOSize,
@@ -62,7 +60,6 @@ impl<'f> Node<'f> {
     Node {
       data,
       state: s,
-      start: addr,
       end: s.end_addr::<I>(data, sizes, num_trans),
       num_trans,
       sizes,
@@ -74,7 +71,6 @@ impl<'f> Node<'f> {
     Node {
       data: &[],
       state: Striated(0),
-      start: END_ADDRESS,
       end: END_ADDRESS,
       num_trans: 0,
       sizes: IOSize::new(),
@@ -212,7 +208,8 @@ impl Striated {
     let tbytes = node.sizes.transition_bytes();
     let ibytes = size_of::<I>();
     let trans_size = ibytes + obytes + tbytes;
-    let mut at = node.start
+    let mut at = node.data.len()
+      - 1
       - self.num_trans_len::<I>()
       - 1 // IOSize
       - trans_size * (i+1);
@@ -243,7 +240,8 @@ impl Striated {
     let tbytes = node.sizes.transition_bytes();
     let ibytes = size_of::<I>();
     let trans_size = ibytes + obytes + tbytes;
-    let mut at = node.start
+    let mut at = node.data.len()
+      - 1
       - self.num_trans_len::<I>()
       - 1;
     (0..node.num_trans).map(move |_| {
