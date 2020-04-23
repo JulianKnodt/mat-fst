@@ -107,9 +107,7 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
   }
   pub fn len(&self) -> usize { self.meta.len }
   pub fn is_empty(&self) -> bool { self.len() == 0 }
-  pub(crate) fn nbytes(&self) -> usize {
-    self.data.as_ref().len()
-  }
+  pub(crate) fn nbytes(&self) -> usize { self.data.as_ref().len() }
 }
 
 impl<I, O> Fst<Vec<u8>, I, O> {

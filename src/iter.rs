@@ -282,7 +282,7 @@ where
     let root = self.data.root();
     for t0 in root.trans_iter() {
       let node = self.data.node(t0.addr);
-      for t1 in node.trans_iter() {
+      for t1 in node.range_iter() {
         f(
           [t0.input, t1.input],
           self.data.outputs[t0.num_out.cat(&t1.num_out) as usize],

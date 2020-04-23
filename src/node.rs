@@ -97,19 +97,16 @@ impl<'f> Node<'f> {
     Bytes<I>: Deserialize, {
     self.state.trans_iter(&self)
   }
+  #[inline]
+  pub fn range_iter<'a, I: Input + 'a>(&'a self) -> impl Iterator<Item = Transition<I>> + 'a
+  where
+    Bytes<I>: Deserialize, {
+    self.state.range_iter(&self)
+  }
 }
 
 fn is_range_iter<V: Iterator<Item = u32>>(mut vs: V) -> bool {
-  let mut curr = if let Some(f) = vs.next() {
-    f
-  } else {
-    return true;
-  };
-  vs.all(|v| {
-    let ok = curr == v - 1;
-    curr = v;
-    ok
-  })
+  vs.enumerate().all(|(i, v)| v == i as u32)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -117,6 +114,8 @@ pub struct Striated(u8);
 
 const RANGE_MASK: u8 = 0b1000_0000;
 const SIZE_MASK: u8 = 0b0110_0000;
+const INPUT_RANGE_MASK: u8 = 0b0001_0000;
+
 impl Striated {
   const fn new() -> Self { Self(0b00_000000) }
   fn compile<W: Write, I: Input>(
@@ -126,22 +125,21 @@ impl Striated {
   ) -> io::Result<()>
   where
     Bytes<I>: Serialize,
-    Bytes<I>: Serialize {
+    Bytes<I>: Serialize, {
     assert!(node.transitions.len() <= I::max_value().as_usize());
     let mut sink = io::sink();
-    let (ibytes, tbytes, obytes, any_outs) =
-      node
-        .transitions
-        .iter()
-        .fold((0, 0, 0, false), |(ibytes, tbytes, obytes, any_outs), trans| {
-          let next_tsize = Pack(delta(addr, trans.addr)).size();
-          (
-            ibytes.max(Bytes(trans.input).pack(&mut sink).unwrap()),
-            tbytes.max(next_tsize),
-            obytes.max(Bytes(trans.num_out).pack(&mut sink).unwrap()),
-            any_outs || trans.num_out > 0,
-          )
-        });
+    let (ibytes, tbytes, obytes, any_outs) = node.transitions.iter().fold(
+      (0, 0, 0, false),
+      |(ibytes, tbytes, obytes, any_outs), trans| {
+        let next_tsize = Pack(delta(addr, trans.addr)).size();
+        (
+          ibytes.max(Bytes(trans.input).pack(&mut sink).unwrap()),
+          tbytes.max(next_tsize),
+          obytes.max(Bytes(trans.num_out).pack(&mut sink).unwrap()),
+          any_outs || trans.num_out > 0,
+        )
+      },
+    );
     let is_range = is_range_iter(node.transitions.iter().map(|v| v.num_out));
     let obytes = if !is_range && any_outs { obytes } else { 0 };
     let iosize = IOSize::sizes(obytes, tbytes);
@@ -250,6 +248,35 @@ impl Striated {
       } else {
         Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
       };
+      let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
+      let addr = undo_delta(node.end, delta);
+      Transition {
+        input,
+        num_out: output,
+        addr,
+      }
+    })
+  }
+  /// Iterates under the assumption that this node's outputs form a range
+  /// Panics if this is not a range.
+  #[inline]
+  pub fn range_iter<'a, I: Input>(
+    self,
+    node: &'a Node<'_>,
+  ) -> impl Iterator<Item = Transition<I>> + 'a
+  where
+    Bytes<I>: Deserialize, {
+    let obytes = node.sizes.output_bytes();
+    let tbytes = node.sizes.transition_bytes();
+    let ibytes = self.input_bytes();
+    let trans_size = ibytes + obytes + tbytes;
+    let mut at = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
+    assert!(self.is_range());
+    (0..node.num_trans).map(move |i| {
+      at -= trans_size;
+      let reader = &mut &node.data[at..];
+      let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+      let output = i as u32;
       let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
       let addr = undo_delta(node.end, delta);
       Transition {
