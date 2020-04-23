@@ -87,10 +87,7 @@ impl<'f> Node<'f> {
   pub(crate) fn find_input<I: Input>(&self, b: I) -> Option<usize>
   where
     Bytes<I>: Deserialize, {
-    self
-      .state
-      .trans_iter::<I>(self)
-      .position(|t| t.input == b)
+    self.state.trans_iter::<I>(self).position(|t| t.input == b)
   }
   pub fn trans_iter<'a, I: Input + 'a>(&'a self) -> impl Iterator<Item = Transition<I>> + 'a
   where
@@ -102,6 +99,7 @@ impl<'f> Node<'f> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Striated(u8);
 
+const RANGE_MASK: u8 = 0b1000_0000;
 impl Striated {
   const fn new() -> Self { Self(0b00_000000) }
   fn compile<W: Write, I: Input>(
@@ -138,7 +136,11 @@ impl Striated {
     }
     Bytes(iosize.encode()).write_le(&mut wtr)?;
     if state.state_num_trans().is_none() {
-      assert_ne!(node.transitions.len(), 0, "UNREACHABLE 0 should be encoded in state");
+      assert_ne!(
+        node.transitions.len(),
+        0,
+        "UNREACHABLE 0 should be encoded in state"
+      );
       let s = I::from_usize(node.transitions.len() - 1);
       Bytes(s).write_le(&mut wtr)?;
       assert_ne!(state.num_trans_len::<I>(), 0);
@@ -200,6 +202,13 @@ impl Striated {
       - 1 // IOSize
       - num_trans * trans_size
   }
+  /// Used to denote that the input is repeating by some frequency
+  fn mark_repeating_range<I: Input>(&mut self, is_ranged: bool) {
+    if is_ranged {
+      self.0 |= RANGE_MASK;
+    }
+  }
+  fn is_repeating_range<I: Input>(self) -> bool { self.0 & RANGE_MASK == RANGE_MASK }
   /// gets the ith transition of this node
   pub fn transition<I: Input>(self, node: &Node<'_>, i: usize) -> Transition<I>
   where
@@ -240,23 +249,13 @@ impl Striated {
     let tbytes = node.sizes.transition_bytes();
     let ibytes = size_of::<I>();
     let trans_size = ibytes + obytes + tbytes;
-    let mut at = node.data.len()
-      - 1
-      - self.num_trans_len::<I>()
-      - 1;
+    let mut at = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
     (0..node.num_trans).map(move |_| {
-      at -= tbytes;
-      let delta = Bytes::<u64>::read_le(&mut &node.data[at..], tbytes as u8)
-        .unwrap()
-        .inner();
-      at -= obytes;
-      let output = Bytes::<u32>::read_le(&mut &node.data[at..], obytes as u8)
-        .unwrap()
-        .inner();
-      at -= ibytes;
-      let input = Bytes::<I>::read_le(&mut &node.data[at..], ibytes as u8)
-        .unwrap()
-        .inner();
+      at -= trans_size;
+      let reader = &mut &node.data[at..];
+      let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+      let output = Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner();
+      let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
       let addr = undo_delta(node.end, delta);
       Transition {
         input,
@@ -271,7 +270,6 @@ impl Striated {
 /// 4 Transition Addr Size | 4 Output Size | 1 Input Size
 /// Ranges of values: [1, 8] | [0, 8] |1, 2]
 /// All 0 indicates that there are no transitions or outputs.
-// TODO need to encode input bytes as well but maybe want to encode that in the state
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct IOSize(u8);
 impl IOSize {
@@ -319,7 +317,6 @@ mod iosize_tests {
 }
 
 /// Returns the necessary amount to go from trans address to node address
-// TODO also return packed size of both addresses here
 #[inline]
 fn delta(node_addr: CompiledAddr, trans_addr: CompiledAddr) -> usize {
   if trans_addr == END_ADDRESS {
