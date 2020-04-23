@@ -5,29 +5,6 @@ use crate::{
 };
 use num::{One, Zero};
 
-/*
-#[test]
-fn viter() {
-  use crate::output::FiniteFloat;
-  let mut builder = Builder::memory().unwrap();
-  let n = 5u8;
-  for i in 0..=n {
-    for j in 0..=n {
-      for k in 0..=n {
-        assert!(builder
-          .insert([i, j, k], FiniteFloat::new((i + j + k) as f32))
-          .is_ok());
-      }
-    }
-  }
-  let fst = builder.into_fst();
-  let expected = (0..=n).flat_map(|i| {
-    (0..=n).flat_map(move |j| (0..=n).map(move |k| FiniteFloat::new((i + j + k) as f32)))
-  });
-  assert!(fst.values().eq(expected));
-}
-*/
-
 #[test]
 fn iter() {
   use crate::output::FiniteFloat;
@@ -46,7 +23,6 @@ fn iter() {
   );
 }
 
-/*
 #[test]
 fn vec_matmul() {
   let mul = FiniteFloat::new(0.3);
@@ -120,4 +96,3 @@ fn par_vec_matmul() {
     assert_eq!(mul, i)
   }
 }
-*/
