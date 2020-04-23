@@ -97,7 +97,7 @@ where
 pub fn immediate_range_iter<I: Input>(
   addr: CompiledAddr,
   data: &[u8],
-) -> impl Iterator<Item = Transition<I>> + '_
+) -> impl Iterator<Item = I> + '_
 where
   Bytes<I>: Deserialize, {
   assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
@@ -112,12 +112,7 @@ where
   (0..num_trans).map(move |i| {
     at -= ibytes;
     let reader = &mut &data[at..];
-    let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
-    Transition {
-      input,
-      num_out: i as u32,
-      addr: END_ADDRESS,
-    }
+    Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
   })
 }
 

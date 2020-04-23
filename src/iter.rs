@@ -281,13 +281,22 @@ where
     F: FnMut([I; 2], O), {
     let data = self.data.data.as_ref();
     for t0 in immediate_iter(self.data.meta.root_addr, data) {
-      // for t0 in self.data.root().trans_iter() {
-      for t1 in immediate_range_iter(t0.addr, data) {
+      for (i, t1) in immediate_range_iter(t0.addr, data).enumerate() {
         f(
-          [t0.input, t1.input],
-          self.data.outputs[(t0.num_out + t1.num_out) as usize],
+          [t0.input, t1],
+          self.data.outputs[(t0.num_out + i as u32) as usize],
         )
       }
     }
+  }
+  pub fn iter2(&self) -> impl Iterator<Item=([I; 2], O)> + '_ {
+    let data = self.data.data.as_ref();
+    immediate_iter(self.data.meta.root_addr, data).flat_map(move |t0| {
+      immediate_range_iter(t0.addr, data).enumerate().map(move |(i, t1)| {
+        ([t0.input, t1],
+          self.data.outputs[(t0.num_out + i as u32) as usize],
+        )
+      })
+    })
   }
 }
