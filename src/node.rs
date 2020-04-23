@@ -247,7 +247,7 @@ impl Striated {
     let num_out = if self.is_range() {
       i as u32
     } else {
-       Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
+      Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
     };
     let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
     Transition {
