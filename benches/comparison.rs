@@ -44,11 +44,17 @@ fn load_matrix(thresh: f32) -> COO<u16, FiniteFloat<f32>, 2> {
   COO::from_iter([1024u16, 512], entries)
 }
 
-pub fn low_nnz(c: &mut Criterion) {
-  let mat = load_matrix(0.05).to_csr();
+pub fn csr(c: &mut Criterion) {
   let vec = [FiniteFloat::new(1.0); 512];
   let mut out = vec![FiniteFloat::new(0.0); 1024];
   c.bench_function("csr vecmul low nnz", |b| {
+    let mat = load_matrix(0.05).to_csr();
+    b.iter(|| {
+      mat.vecmul_into(black_box(&vec), &mut out);
+    })
+  });
+  c.bench_function("csr vecmul high nnz", |b| {
+    let mat = load_matrix(TEN_P_THRESH).to_csr();
     b.iter(|| {
       mat.vecmul_into(black_box(&vec), &mut out);
     })
@@ -58,6 +64,6 @@ pub fn low_nnz(c: &mut Criterion) {
 criterion_group! {
   name = comparison;
   config = Criterion::default().warm_up_time(Duration::from_secs(8));
-  targets = low_nnz,
+  targets = csr,
 }
 criterion_main!(comparison);
