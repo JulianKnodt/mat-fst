@@ -15,8 +15,8 @@ pub(crate) const INVALID_ADDRESS: CompiledAddr = 1;
 
 #[derive(Debug)]
 pub struct Fst<D, I, O> {
-  meta: Meta,
-  data: D,
+  pub(crate) meta: Meta,
+  pub(crate) data: D,
   /// Output values associated with this FST
   pub(crate) outputs: Vec<O>,
   /// What is the input type of this FST?
@@ -25,7 +25,7 @@ pub struct Fst<D, I, O> {
 
 #[derive(Debug)]
 pub struct Meta {
-  root_addr: CompiledAddr,
+  pub(crate) root_addr: CompiledAddr,
   // need to encode type here as well
   len: usize,
 }

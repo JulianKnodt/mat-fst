@@ -3,7 +3,7 @@ use crate::{
   fst::{Fst, Transition},
   input::Input,
   matrix::Matrix,
-  node::Node,
+  node::{immediate_iter, immediate_range_iter, Node},
   output::Output,
 };
 use num::Zero;
@@ -279,8 +279,10 @@ where
   pub fn eager_iter<F>(&self, mut f: F)
   where
     F: FnMut([I; 2], O), {
-    for t0 in self.data.root().trans_iter() {
-      for t1 in self.data.node(t0.addr).range_iter() {
+    let data = self.data.data.as_ref();
+    for t0 in immediate_iter(self.data.meta.root_addr, data) {
+      // for t0 in self.data.root().trans_iter() {
+      for t1 in immediate_range_iter(t0.addr, data) {
         f(
           [t0.input, t1.input],
           self.data.outputs[(t0.num_out + t1.num_out) as usize],
