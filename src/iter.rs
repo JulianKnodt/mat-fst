@@ -279,13 +279,11 @@ where
   pub fn eager_iter<F>(&self, mut f: F)
   where
     F: FnMut([I; 2], O), {
-    let root = self.data.root();
-    for t0 in root.trans_iter() {
-      let node = self.data.node(t0.addr);
-      for t1 in node.range_iter() {
+    for t0 in self.data.root().trans_iter() {
+      for t1 in self.data.node(t0.addr).range_iter() {
         f(
           [t0.input, t1.input],
-          self.data.outputs[t0.num_out.cat(&t1.num_out) as usize],
+          self.data.outputs[(t0.num_out + t1.num_out) as usize],
         )
       }
     }

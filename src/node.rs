@@ -5,6 +5,8 @@ use crate::{
   input::Input,
   output::Output,
 };
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use std::{
   convert::TryInto,
   io::{self, Write},
@@ -102,6 +104,22 @@ impl<'f> Node<'f> {
   where
     Bytes<I>: Deserialize, {
     self.state.range_iter(&self)
+  }
+  #[cfg(feature = "parallel")]
+  pub fn par_trans_iter<'a, I: Input + 'a>(
+    &'a self,
+  ) -> impl ParallelIterator<Item = Transition<I>> + 'a
+  where
+    Bytes<I>: Deserialize, {
+    self.state.par_trans_iter(&self)
+  }
+  #[cfg(feature = "parallel")]
+  pub fn par_range_iter<'a, I: Input + 'a>(
+    &'a self,
+  ) -> impl ParallelIterator<Item = Transition<I>> + 'a
+  where
+    Bytes<I>: Deserialize, {
+    self.state.par_range_iter(&self)
   }
 }
 
@@ -270,23 +288,79 @@ impl Striated {
   ) -> impl Iterator<Item = Transition<I>> + 'a
   where
     Bytes<I>: Deserialize, {
-    let obytes = node.sizes.output_bytes();
-    let tbytes = node.sizes.transition_bytes();
+    assert_eq!(node.sizes.transition_bytes(), 0);
+    assert_eq!(node.sizes.output_bytes(), 0);
     let ibytes = self.input_bytes();
-    let trans_size = ibytes + obytes + tbytes;
+    let trans_size = ibytes;
     let mut at = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
     assert!(self.is_range());
-    assert_eq!(tbytes, 0);
     (0..node.num_trans).map(move |i| {
       at -= trans_size;
       let reader = &mut &node.data[at..];
       let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
-      let output = i as u32;
-      let addr = END_ADDRESS;
+      Transition {
+        input,
+        num_out: i as u32,
+        addr: END_ADDRESS,
+      }
+    })
+  }
+
+  #[cfg(feature = "parallel")]
+  pub fn par_trans_iter<'a, I: Input>(
+    self,
+    node: &'a Node<'_>,
+  ) -> impl ParallelIterator<Item = Transition<I>> + 'a
+  where
+    Bytes<I>: Deserialize, {
+    let obytes = node.sizes.output_bytes();
+    let tbytes = node.sizes.transition_bytes();
+    let ibytes = self.input_bytes();
+    let trans_size = ibytes + obytes + tbytes;
+    let mut start = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
+    let is_range = self.is_range();
+    (0..node.num_trans).into_par_iter().map(move |i| {
+      let at = start - (i + 1) * trans_size;
+      let reader = &mut &node.data[at..];
+      let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+      let output = if is_range {
+        i as u32
+      } else {
+        Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
+      };
+      let addr = if tbytes == 0 {
+        END_ADDRESS
+      } else {
+        let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
+        undo_delta(node.end, delta)
+      };
       Transition {
         input,
         num_out: output,
         addr,
+      }
+    })
+  }
+  #[cfg(feature = "parallel")]
+  pub fn par_range_iter<'a, I: Input>(
+    self,
+    node: &'a Node<'_>,
+  ) -> impl ParallelIterator<Item = Transition<I>> + 'a
+  where
+    Bytes<I>: Deserialize, {
+    assert_eq!(node.sizes.transition_bytes(), 0);
+    assert_eq!(node.sizes.output_bytes(), 0);
+    let ibytes = self.input_bytes();
+    let mut start = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
+    assert!(self.is_range());
+    (0..node.num_trans).into_par_iter().map(move |i| {
+      let at = start - (i + 1) * ibytes;
+      let reader = &mut &node.data[at..];
+      let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+      Transition {
+        input,
+        num_out: i as u32,
+        addr: END_ADDRESS,
       }
     })
   }
@@ -354,6 +428,7 @@ fn delta(node_addr: CompiledAddr, trans_addr: CompiledAddr) -> usize {
 
 /// Takes an address for a node and some delta to a transition and returns that transitions
 /// address, or END_ADDRESS if there is no transition
+#[inline]
 fn undo_delta(node_addr: CompiledAddr, delta: u64) -> CompiledAddr {
   let delta: usize = u64_to_usize(delta);
   if delta == END_ADDRESS {

@@ -44,24 +44,18 @@ fn load_matrix(thresh: f32) -> Matrix<Vec<u8>, u16, FiniteFloat<f32>, 2> {
   Matrix::new([1024u16, 512], entries)
 }
 
-pub fn low_nnz(c: &mut Criterion) {
+pub fn par_fst(c: &mut Criterion) {
   let mat = load_matrix(0.05);
   let vec = [FiniteFloat::new(1.0); 512];
   let mut buf = [FiniteFloat::new(0.0); 1024];
   c.bench_function("par vecmul low nnz", |b| {
     b.iter(|| {
-      mat.par_vecmul_into(black_box(&vec), &mut buf);
+      mat.eager_par_vecmul_into(black_box(&vec), &mut buf);
     })
   });
-}
-
-pub fn high_nnz(c: &mut Criterion) {
-  let mat = load_matrix(TEN_P_THRESH);
-  let vec = [FiniteFloat::new(1.0); 512];
-  let mut buf = [FiniteFloat::new(0.0); 1024];
   c.bench_function("par vecmul high nnz", |b| {
     b.iter(|| {
-      mat.par_vecmul_into(black_box(&vec), &mut buf);
+      mat.eager_par_vecmul_into(black_box(&vec), &mut buf);
     })
   });
 }
@@ -69,6 +63,6 @@ pub fn high_nnz(c: &mut Criterion) {
 criterion_group! {
   name = par_benches;
   config = Criterion::default().warm_up_time(Duration::from_secs(8));
-  targets = low_nnz, high_nnz
+  targets = par_fst,
 }
 criterion_main!(par_benches);

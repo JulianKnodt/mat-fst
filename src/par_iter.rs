@@ -1,4 +1,11 @@
-use crate::{bytes::*, fst::Fst, input::Input, matrix::Matrix, node::Node, output::Output};
+use crate::{
+  bytes::*,
+  fst::{Fst, Transition},
+  input::Input,
+  matrix::Matrix,
+  node::Node,
+  output::Output,
+};
 use num::Zero;
 use rayon::{iter::plumbing::*, prelude::*};
 use std::{
@@ -145,6 +152,43 @@ where
       .unzip();
     for (i, &y) in idxs.iter().enumerate() {
       out[y] = vals[i];
+    }
+  }
+  pub fn eager_par_vecmul_into(&self, vec: &[O], out: &mut [O]) {
+    assert_eq!(
+      self.dims[1].as_usize(),
+      vec.len(),
+      "dimension mismatch, expected vector of len {}",
+      self.dims[1]
+    );
+    assert_eq!(
+      self.dims[0].as_usize(),
+      out.len(),
+      "dimension mismatch, expected output vector of len {}",
+      self.dims[0]
+    );
+    let (idxs, vals): (Vec<I>, Vec<O>) = self
+      .data
+      .root()
+      .par_trans_iter()
+      .map(|t0: Transition<I>| {
+        let row_sum = self
+          .data
+          .node(t0.addr)
+          .par_range_iter()
+          .map(|t1: Transition<I>| {
+            (
+              t1.input,
+              self.data.outputs[(t0.num_out + t1.num_out) as usize],
+            )
+          })
+          .fold(O::zero, |a, (x, b)| a + b * vec[x.as_usize()])
+          .reduce(O::zero, |a, b| a + b);
+        (t0.input, row_sum)
+      })
+      .unzip();
+    for (i, y) in idxs.iter().enumerate() {
+      out[y.as_usize()] = vals[i];
     }
   }
 }

@@ -6,7 +6,20 @@ use std::{
 
 /// A trait which represents a possible input language type
 pub trait Input:
-  Zero + One + Display + Debug + Hash + Bounded + Default + Sized + Clone + Copy + Eq + Ord {
+  Zero
+  + One
+  + Display
+  + Debug
+  + Hash
+  + Bounded
+  + Default
+  + Sized
+  + Clone
+  + Copy
+  + Eq
+  + Ord
+  + Send
+  + Sync {
   fn as_usize(self) -> usize;
   fn from_usize(i: usize) -> Self;
 }
