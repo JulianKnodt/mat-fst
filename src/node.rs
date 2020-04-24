@@ -49,73 +49,6 @@ pub struct Node<'a> {
   sizes: IOSize,
 }
 
-// Instead of creating a node just create an iterator over transitions
-// removing the intermediate node structure.
-pub fn immediate_iter<I: Input>(
-  addr: CompiledAddr,
-  data: &[u8],
-) -> impl Iterator<Item = Transition<I>> + '_
-where
-  Bytes<I>: Deserialize, {
-  assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
-  let s = Striated(data[addr]);
-  let data = &data[..addr + 1];
-  let sizes = s.sizes::<I>(data);
-  let num_trans = s.num_trans::<I>(data);
-  let obytes = sizes.output_bytes();
-  let tbytes = sizes.transition_bytes();
-  let ibytes = s.input_bytes();
-  let trans_size = ibytes + obytes + tbytes;
-  let mut at = addr - s.num_trans_len::<I>() - 1;
-  let end_addr = at - num_trans * trans_size;
-  let is_range = s.is_range();
-  (0..num_trans).map(move |i| {
-    at -= trans_size;
-    let reader = &mut &data[at..];
-    let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
-    let output = if is_range {
-      i as u32
-    } else {
-      Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
-    };
-    let addr = if tbytes == 0 {
-      END_ADDRESS
-    } else {
-      let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
-      undo_delta(end_addr, delta)
-    };
-    Transition {
-      input,
-      num_out: output,
-      addr,
-    }
-  })
-}
-
-// Instead of creating a node just create an iterator over transitions
-// removing the intermediate node structure.
-pub fn immediate_range_iter<I: Input>(
-  addr: CompiledAddr,
-  data: &[u8],
-) -> impl Iterator<Item = I> + '_
-where
-  Bytes<I>: Deserialize, {
-  assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
-  let s = Striated(data[addr]);
-  let data = &data[..addr + 1];
-  let sizes = s.sizes::<I>(data);
-  let num_trans = s.num_trans::<I>(data);
-  assert!(s.is_range());
-  let ibytes = s.input_bytes();
-  let mut at = addr - s.num_trans_len::<I>() - 1;
-  let end_addr = at - num_trans * ibytes;
-  (0..num_trans).map(move |i| {
-    at -= ibytes;
-    let reader = &mut &data[at..];
-    Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
-  })
-}
-
 impl<'f> Node<'f> {
   pub fn new<I: Input>(addr: CompiledAddr, data: &[u8]) -> Node<'_>
   where
@@ -503,4 +436,136 @@ fn undo_delta(node_addr: CompiledAddr, delta: u64) -> CompiledAddr {
   } else {
     node_addr - delta
   }
+}
+
+// Instead of creating a node just create an iterator over transitions
+// removing the intermediate node structure.
+pub fn immediate_iter<I: Input>(
+  addr: CompiledAddr,
+  data: &[u8],
+) -> impl Iterator<Item = Transition<I>> + '_
+where
+  Bytes<I>: Deserialize, {
+  assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
+  let s = Striated(data[addr]);
+  let data = &data[..addr + 1];
+  let sizes = s.sizes::<I>(data);
+  let num_trans = s.num_trans::<I>(data);
+  let obytes = sizes.output_bytes();
+  let tbytes = sizes.transition_bytes();
+  let ibytes = s.input_bytes();
+  let trans_size = ibytes + obytes + tbytes;
+  let mut at = addr - s.num_trans_len::<I>() - 1;
+  let end_addr = at - num_trans * trans_size;
+  let is_range = s.is_range();
+  (0..num_trans).map(move |i| {
+    at -= trans_size;
+    let reader = &mut &data[at..];
+    let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+    let output = if is_range {
+      i as u32
+    } else {
+      Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
+    };
+    let addr = if tbytes == 0 {
+      END_ADDRESS
+    } else {
+      let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
+      undo_delta(end_addr, delta)
+    };
+    Transition {
+      input,
+      num_out: output,
+      addr,
+    }
+  })
+}
+
+// Instead of creating a node just create an iterator over transitions
+// removing the intermediate node structure.
+pub fn immediate_range_iter<I: Input>(
+  addr: CompiledAddr,
+  data: &[u8],
+) -> impl Iterator<Item = I> + '_
+where
+  Bytes<I>: Deserialize, {
+  assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
+  let s = Striated(data[addr]);
+  let data = &data[..addr + 1];
+  let sizes = s.sizes::<I>(data);
+  let num_trans = s.num_trans::<I>(data);
+  assert!(s.is_range());
+  let ibytes = s.input_bytes();
+  let mut at = addr - s.num_trans_len::<I>() - 1;
+  (0..num_trans).map(move |i| {
+    at -= ibytes;
+    let reader = &mut &data[at..];
+    Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
+  })
+}
+
+#[cfg(feature = "parallel")]
+// Instead of creating a node just create an iterator over transitions
+// removing the intermediate node structure.
+pub fn par_immediate_iter<I: Input>(
+  addr: CompiledAddr,
+  data: &[u8],
+) -> impl IndexedParallelIterator<Item = Transition<I>> + '_
+where
+  Bytes<I>: Deserialize, {
+  assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
+  let s = Striated(data[addr]);
+  let data = &data[..addr + 1];
+  let sizes = s.sizes::<I>(data);
+  let num_trans = s.num_trans::<I>(data);
+  let obytes = sizes.output_bytes();
+  let tbytes = sizes.transition_bytes();
+  let ibytes = s.input_bytes();
+  let trans_size = ibytes + obytes + tbytes;
+  let start = addr - s.num_trans_len::<I>() - 1;
+  let end_addr = start - num_trans * trans_size;
+  let is_range = s.is_range();
+  (0..num_trans).into_par_iter().map(move |i| {
+    let at = start - (i + 1) * trans_size;
+    let reader = &mut &data[at..];
+    let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+    let output = if is_range {
+      i as u32
+    } else {
+      Bytes::<u32>::read_le(reader, obytes as u8).unwrap().inner()
+    };
+    let addr = if tbytes == 0 {
+      END_ADDRESS
+    } else {
+      let delta = Bytes::<u64>::read_le(reader, tbytes as u8).unwrap().inner();
+      undo_delta(end_addr, delta)
+    };
+    Transition {
+      input,
+      num_out: output,
+      addr,
+    }
+  })
+}
+
+#[cfg(feature = "parallel")]
+pub fn par_immediate_range_iter<I: Input>(
+  addr: CompiledAddr,
+  data: &[u8],
+) -> impl IndexedParallelIterator<Item = I> + '_
+where
+  Bytes<I>: Deserialize, {
+  assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
+  let s = Striated(data[addr]);
+  let data = &data[..addr + 1];
+  let sizes = s.sizes::<I>(data);
+  let num_trans = s.num_trans::<I>(data);
+  assert!(s.is_range());
+  let ibytes = s.input_bytes();
+  let start = addr - s.num_trans_len::<I>() - 1;
+  (0..num_trans).into_par_iter().map(move |i| {
+    let at = start - (i + 1) * ibytes;
+    let reader = &mut &data[at..];
+    Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
+  })
 }

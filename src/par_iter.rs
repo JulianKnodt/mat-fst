@@ -3,7 +3,7 @@ use crate::{
   fst::{Fst, Transition},
   input::Input,
   matrix::Matrix,
-  node::Node,
+  node::{par_immediate_iter, par_immediate_range_iter, Node},
   output::Output,
 };
 use num::Zero;
@@ -167,21 +167,12 @@ where
       "dimension mismatch, expected output vector of len {}",
       self.dims[0]
     );
-    let (idxs, vals): (Vec<I>, Vec<O>) = self
-      .data
-      .root()
-      .par_trans_iter()
+    let data = self.data.data.as_ref();
+    let (idxs, vals): (Vec<I>, Vec<O>) = par_immediate_iter(self.data.meta.root_addr, data)
       .map(|t0: Transition<I>| {
-        let row_sum = self
-          .data
-          .node(t0.addr)
-          .par_range_iter()
-          .map(|t1: Transition<I>| {
-            (
-              t1.input,
-              self.data.outputs[(t0.num_out + t1.num_out) as usize],
-            )
-          })
+        let row_sum = par_immediate_range_iter(t0.addr, data)
+          .enumerate()
+          .map(|(i, t1): (usize, I)| (t1, self.data.outputs[t0.num_out as usize + i]))
           .fold(O::zero, |a, (x, b)| a + b * vec[x.as_usize()])
           .reduce(O::zero, |a, b| a + b);
         (t0.input, row_sum)
