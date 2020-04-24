@@ -53,7 +53,7 @@ macro_rules! SerDesUnsigned {
     impl Deserialize for Bytes<$u> {
       #[inline]
       fn read_le<R: Read>(from: &mut R, n: u8) -> io::Result<Self> {
-        debug_assert!(n <= (size_of::<$u>() as u8));
+        debug_assert!(n <= (size_of::<$u>() as u8), "Got size of {:?}", n);
         let mut buf = [0; size_of::<$u>()];
         from.read_exact(&mut buf[..n as usize])?;
         Ok(<$u>::from_le_bytes(buf).into())

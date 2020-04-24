@@ -58,7 +58,7 @@ impl<'f> Node<'f> {
     }
     let s = Striated(data[addr]);
     let data = &data[..addr + 1];
-    let sizes = s.sizes::<I>(data);
+    let sizes = s.sizes(data);
     let num_trans = s.num_trans::<I>(data);
     Node {
       data,
@@ -127,6 +127,18 @@ fn is_range_iter<V: Iterator<Item = u32>>(mut vs: V) -> bool {
   vs.enumerate().all(|(i, v)| v == i as u32)
 }
 
+fn mismatches<I: Input, V: Iterator<Item = I>>(mut is: V) -> impl Iterator<Item = I> {
+  let mut mismatch = 0;
+  is.enumerate().filter_map(move |(i, v)| {
+    if i + mismatch == v.as_usize() {
+      None
+    } else {
+      mismatch = v.as_usize() - i;
+      Some(v)
+    }
+  })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Striated(u8);
 
@@ -146,71 +158,76 @@ impl Striated {
     Bytes<I>: Serialize, {
     assert!(node.transitions.len() <= I::max_value().as_usize());
     let mut sink = io::sink();
-    let (ibytes, tbytes, obytes, any_outs) = node.transitions.iter().fold(
-      (0, 0, 0, false),
-      |(ibytes, tbytes, obytes, any_outs), trans| {
-        let next_tsize = Pack(delta(addr, trans.addr)).size();
-        (
-          ibytes.max(Bytes(trans.input).pack(&mut sink).unwrap()),
-          tbytes.max(next_tsize),
-          obytes.max(Bytes(trans.num_out).pack(&mut sink).unwrap()),
-          any_outs || trans.num_out > 0,
-        )
-      },
-    );
+    let (ibytes, tbytes, obytes, any_outs) =
+      node
+        .transitions
+        .iter()
+        .fold((1, 0, 0, false), |(ibytes, tbytes, obytes, any_outs), t| {
+          (
+            ibytes.max(Bytes(t.input).pack(&mut sink).unwrap()),
+            tbytes.max(Pack(delta(addr, t.addr)).size()),
+            obytes.max(Bytes(t.num_out).pack(&mut sink).unwrap()),
+            any_outs || t.num_out > 0,
+          )
+        });
     let is_range = is_range_iter(node.transitions.iter().map(|v| v.num_out));
+    let is_input_range = mismatches(node.transitions.iter().map(|v| v.input)).count() == 0;
+    let ibytes = if is_input_range { 0 } else { ibytes };
     let obytes = if !is_range && any_outs { obytes } else { 0 };
     let iosize = IOSize::sizes(obytes, tbytes);
     let mut state = Self::new();
     state.set_input_bytes(ibytes);
     if is_range {
-      assert_eq!(node.transitions[0].num_out, 0);
+      debug_assert_eq!(node.transitions[0].num_out, 0);
       state.set_range();
+    }
+    if is_input_range {
+      state.set_input_range();
     }
     for t in node.transitions.iter().rev() {
       let &Transition { input, num_out, .. } = t;
-      Bytes(input).pack_to(ibytes, &mut wtr)?;
-      if !is_range {
-        Bytes(num_out).pack_to(obytes, &mut wtr)?;
+      if !is_input_range {
+        Bytes(input).pack_to(ibytes, &mut wtr)?;
       }
+      Bytes(num_out).pack_to(obytes, &mut wtr)?;
       Bytes(delta(addr, t.addr)).pack_to(tbytes, &mut wtr)?;
     }
     Bytes(iosize.encode()).write_le(&mut wtr)?;
-    // we should never encode 0 transitions
-    debug_assert_ne!(node.transitions.len(), 0);
-    let s = I::from_usize(node.transitions.len() - 1);
-    Bytes(s).pack_to(ibytes, &mut wtr)?;
+    let s = (node.transitions.len() - 1) as u32;
+    Bytes(s).write_le(&mut wtr)?;
     Bytes(state.0).write_le(&mut wtr)?;
     Ok(())
   }
-  fn sizes<I: Input>(self, data: &[u8]) -> IOSize {
-    let i = data.len() - 1 - self.num_trans_len::<I>() - 1;
+  fn sizes(self, data: &[u8]) -> IOSize {
+    let i = data.len() - 1 - self.num_trans_len() - 1;
     IOSize::decode(data[i])
   }
   // returns the size of the encoded number of transitions
-  const fn num_trans_len<I: Input>(self) -> usize { self.input_bytes() }
+  const fn num_trans_len(self) -> usize { size_of::<u32>() }
   // returns the number of transitions for a given amt of data
-  fn num_trans<I: Input>(self, data: &[u8]) -> usize
-  where
-    Bytes<I>: Deserialize, {
-    let input_len = self.input_bytes();
-    Bytes::<I>::read_le(&mut &data[data.len() - 1 - input_len..], input_len as u8)
+  fn num_trans<I: Input>(self, data: &[u8]) -> usize {
+    let len = self.num_trans_len();
+    Bytes::<u32>::read_le(&mut &data[data.len() - 1 - len..], len as u8)
       .unwrap()
       .inner()
-      .as_usize()
+      as usize
       + 1
   }
   fn end_addr<I: Input>(self, data: &[u8], sizes: IOSize, num_trans: usize) -> CompiledAddr {
     let trans_size = self.input_bytes() + sizes.output_bytes() + sizes.transition_bytes();
     data.len()
       - 1
-      - self.num_trans_len::<I>()
+      - self.num_trans_len()
       - 1 // IOSize
       - num_trans * trans_size
   }
   /// Used to denote that the input is repeating by some frequency
   fn set_range(&mut self) { self.0 |= RANGE_MASK; }
   const fn is_range(self) -> bool { self.0 & RANGE_MASK == RANGE_MASK }
+
+  fn set_input_range(&mut self) { self.0 |= INPUT_RANGE_MASK; }
+  const fn is_input_range(self) -> bool { self.0 & INPUT_RANGE_MASK == INPUT_RANGE_MASK }
+
   fn set_input_bytes(&mut self, size: u8) {
     assert!(size < 4);
     // assert!(size > 0, "Encoding one transition of size 0");
@@ -227,11 +244,16 @@ impl Striated {
     let trans_size = ibytes + obytes + tbytes;
     let mut at = node.data.len()
       - 1
-      - self.num_trans_len::<I>()
+      - self.num_trans_len()
       - 1 // IOSize
       - trans_size * (i+1);
     let reader = &mut &node.data[at..];
-    let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+    let input = if self.is_input_range() {
+      at += ibytes;
+      I::from_usize(i)
+    } else {
+      Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
+    };
     let num_out = if self.is_range() {
       i as u32
     } else {
@@ -255,12 +277,16 @@ impl Striated {
     let tbytes = node.sizes.transition_bytes();
     let ibytes = self.input_bytes();
     let trans_size = ibytes + obytes + tbytes;
-    let mut at = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
+    let mut at = node.data.len() - 1 - self.num_trans_len() - 1;
     let is_range = self.is_range();
     (0..node.num_trans).map(move |i| {
       at -= trans_size;
       let reader = &mut &node.data[at..];
-      let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+      let input = if ibytes == 0 {
+        I::from_usize(i)
+      } else {
+        Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
+      };
       let output = if is_range {
         i as u32
       } else {
@@ -292,12 +318,16 @@ impl Striated {
     assert_eq!(node.sizes.output_bytes(), 0);
     let ibytes = self.input_bytes();
     let trans_size = ibytes;
-    let mut at = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
+    let mut at = node.data.len() - 1 - self.num_trans_len() - 1;
     assert!(self.is_range());
     (0..node.num_trans).map(move |i| {
       at -= trans_size;
       let reader = &mut &node.data[at..];
-      let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+      let input = if ibytes == 0 {
+        I::from_usize(i)
+      } else {
+        Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
+      };
       Transition {
         input,
         num_out: i as u32,
@@ -317,7 +347,7 @@ impl Striated {
     let tbytes = node.sizes.transition_bytes();
     let ibytes = self.input_bytes();
     let trans_size = ibytes + obytes + tbytes;
-    let mut start = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
+    let mut start = node.data.len() - 1 - self.num_trans_len() - 1;
     let is_range = self.is_range();
     (0..node.num_trans).into_par_iter().map(move |i| {
       let at = start - (i + 1) * trans_size;
@@ -351,7 +381,7 @@ impl Striated {
     assert_eq!(node.sizes.transition_bytes(), 0);
     assert_eq!(node.sizes.output_bytes(), 0);
     let ibytes = self.input_bytes();
-    let mut start = node.data.len() - 1 - self.num_trans_len::<I>() - 1;
+    let mut start = node.data.len() - 1 - self.num_trans_len() - 1;
     assert!(self.is_range());
     (0..node.num_trans).into_par_iter().map(move |i| {
       let at = start - (i + 1) * ibytes;
@@ -449,19 +479,24 @@ where
   assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
   let s = Striated(data[addr]);
   let data = &data[..addr + 1];
-  let sizes = s.sizes::<I>(data);
+  let sizes = s.sizes(data);
   let num_trans = s.num_trans::<I>(data);
   let obytes = sizes.output_bytes();
   let tbytes = sizes.transition_bytes();
   let ibytes = s.input_bytes();
   let trans_size = ibytes + obytes + tbytes;
-  let mut at = addr - s.num_trans_len::<I>() - 1;
+  let mut at = addr - s.num_trans_len() - 1;
   let end_addr = at - num_trans * trans_size;
   let is_range = s.is_range();
+  let is_input_range = s.is_input_range();
   (0..num_trans).map(move |i| {
     at -= trans_size;
     let reader = &mut &data[at..];
-    let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+    let input = if is_input_range {
+      I::from_usize(i)
+    } else {
+      Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
+    };
     let output = if is_range {
       i as u32
     } else {
@@ -492,11 +527,11 @@ where
   assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
   let s = Striated(data[addr]);
   let data = &data[..addr + 1];
-  let sizes = s.sizes::<I>(data);
+  let sizes = s.sizes(data);
   let num_trans = s.num_trans::<I>(data);
   assert!(s.is_range());
   let ibytes = s.input_bytes();
-  let mut at = addr - s.num_trans_len::<I>() - 1;
+  let mut at = addr - s.num_trans_len() - 1;
   (0..num_trans).map(move |i| {
     at -= ibytes;
     let reader = &mut &data[at..];
@@ -525,10 +560,15 @@ where
   let start = addr - s.num_trans_len::<I>() - 1;
   let end_addr = start - num_trans * trans_size;
   let is_range = s.is_range();
+  let is_input_range = s.is_input_range();
   (0..num_trans).into_par_iter().map(move |i| {
     let at = start - (i + 1) * trans_size;
     let reader = &mut &data[at..];
-    let input = Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner();
+    let input = if is_input_range {
+      I::from_usize(i)
+    } else {
+      Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
+    };
     let output = if is_range {
       i as u32
     } else {

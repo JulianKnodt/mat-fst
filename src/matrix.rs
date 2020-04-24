@@ -85,17 +85,12 @@ where
     let data = self.data.data.as_ref();
     for t0 in immediate_iter::<I>(self.data.meta.root_addr, data) {
       let y = t0.input.as_usize();
-      let start = t0.num_out.as_usize();
+      let start = t0.num_out;
       for (offset, x) in immediate_range_iter::<I>(t0.addr, data).enumerate() {
-        out[y] = out[y] + vec[x.as_usize()] * self.data.outputs[start + offset];
+        assert!(self.data.outputs.len() as u32 > start + offset as u32);
+        out[y] = out[y] + vec[x.as_usize()] * self.data.outputs[(start + offset as u32) as usize];
       }
     }
-    /*
-    self.eager_iter(|[y, x], v| {
-      let y = y.as_usize();
-      out[y] = out[y] + v * vec[x.as_usize()];
-    });
-    */
   }
 }
 
