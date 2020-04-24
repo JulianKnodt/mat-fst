@@ -171,7 +171,8 @@ impl Striated {
           )
         });
     let is_range = is_range_iter(node.transitions.iter().map(|v| v.num_out));
-    let is_input_range = mismatches(node.transitions.iter().map(|v| v.input)).count() == 0;
+    // can only have one of is_range and is_input_range currently
+    let is_input_range = !is_range && mismatches(node.transitions.iter().map(|v| v.input)).count() == 0;
     let ibytes = if is_input_range { 0 } else { ibytes };
     let obytes = if !is_range && any_outs { obytes } else { 0 };
     let iosize = IOSize::sizes(obytes, tbytes);
@@ -530,6 +531,7 @@ where
   let sizes = s.sizes(data);
   let num_trans = s.num_trans::<I>(data);
   assert!(s.is_range());
+  assert!(!s.is_input_range());
   let ibytes = s.input_bytes();
   let mut at = addr - s.num_trans_len() - 1;
   (0..num_trans).map(move |i| {
@@ -551,13 +553,13 @@ where
   assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
   let s = Striated(data[addr]);
   let data = &data[..addr + 1];
-  let sizes = s.sizes::<I>(data);
+  let sizes = s.sizes(data);
   let num_trans = s.num_trans::<I>(data);
   let obytes = sizes.output_bytes();
   let tbytes = sizes.transition_bytes();
   let ibytes = s.input_bytes();
   let trans_size = ibytes + obytes + tbytes;
-  let start = addr - s.num_trans_len::<I>() - 1;
+  let start = addr - s.num_trans_len() - 1;
   let end_addr = start - num_trans * trans_size;
   let is_range = s.is_range();
   let is_input_range = s.is_input_range();
@@ -598,11 +600,12 @@ where
   assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
   let s = Striated(data[addr]);
   let data = &data[..addr + 1];
-  let sizes = s.sizes::<I>(data);
+  let sizes = s.sizes(data);
   let num_trans = s.num_trans::<I>(data);
   assert!(s.is_range());
+  assert!(!s.is_input_range());
   let ibytes = s.input_bytes();
-  let start = addr - s.num_trans_len::<I>() - 1;
+  let start = addr - s.num_trans_len() - 1;
   (0..num_trans).into_par_iter().map(move |i| {
     let at = start - (i + 1) * ibytes;
     let reader = &mut &data[at..];
