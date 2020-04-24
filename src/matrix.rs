@@ -1,8 +1,14 @@
 use crate::{
-  build::Builder, bytes::*, coo::COO, dense::Dense, fst::Fst, input::Input, node::Node,
-  output::Output, util::within,
+  build::Builder,
+  bytes::*,
+  coo::COO,
+  dense::Dense,
+  fst::Fst,
+  input::Input,
+  node::{immediate_iter, immediate_range_iter, Node},
+  output::Output,
+  util::within,
 };
-use crate::node::{immediate_iter, immediate_range_iter};
 use num::{One, Zero};
 use std::{
   array::LengthAtMost32,
