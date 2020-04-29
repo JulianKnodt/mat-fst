@@ -44,21 +44,26 @@ fn load_matrix(thresh: f32) -> Matrix<Vec<u8>, u16, FiniteFloat<f32>, 2> {
 fn items() -> Vec<FiniteFloat<f32>> {
   let f = file();
   let buf = BufReader::new(f);
-  buf.lines().filter_map(|line| {
-    let line = line.ok()?;
-    let mut parts = line.split_whitespace();
-    parts.next()?;
-    parts.next()?;
-    let v = parts.next().unwrap();
-    let v = v.parse::<f32>().unwrap();
-    Some(FiniteFloat::new(v))
-  }).collect()
+  buf
+    .lines()
+    .filter_map(|line| {
+      let line = line.ok()?;
+      let mut parts = line.split_whitespace();
+      parts.next()?;
+      parts.next()?;
+      let v = parts.next().unwrap();
+      let v = v.parse::<f32>().unwrap();
+      Some(FiniteFloat::new(v))
+    })
+    .collect()
 }
 
 pub fn fst(c: &mut Criterion) {
   let vec = [FiniteFloat::new(1.0); 512];
   let is = items();
-  let thresholds = [0.10, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.15, 0.1, 0.05, 0.01];
+  let thresholds = [
+    0.3, 0.2, 0.10, 0.09, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02, 0.015, 0.01, 0.005, 0.001,
+  ];
   for &t in &thresholds {
     let abs_thresh = compute_threshold(is.iter(), t);
     let name = format!("fst vecmul {} sparsity", t);

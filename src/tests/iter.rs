@@ -1,7 +1,4 @@
-use crate::{
-  matrix::Matrix,
-  output::{FiniteFloat},
-};
+use crate::{matrix::Matrix, output::FiniteFloat};
 use num::{One, Zero};
 
 #[test]
