@@ -1,7 +1,6 @@
 use crate::{
-  build::Builder,
   matrix::Matrix,
-  output::{FiniteFloat, Unit},
+  output::{FiniteFloat},
 };
 use num::{One, Zero};
 

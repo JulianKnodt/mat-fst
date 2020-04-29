@@ -1,26 +1,24 @@
 use crate::{
   bytes::*,
-  fst::{Fst, Transition},
   input::Input,
   matrix::Matrix,
   node::{immediate_iter, immediate_range_iter, Node},
   output::Output,
 };
-use num::Zero;
-use std::{array::LengthAtMost32, ops::Range};
+use std::array::LengthAtMost32;
 
 /// An iterator over keys and values for a matrix
 #[derive(Debug, Clone)]
 pub struct Iter<'f, D, I, O, const N: usize>
 where
   [I; N]: LengthAtMost32,
-  [(u32, usize, Node<'f>); N]: LengthAtMost32, {
+  [(u32, usize, Node<'f, I>); N]: LengthAtMost32, {
   matrix: &'f Matrix<D, I, O, N>,
-  root: Node<'f>,
+  root: Node<'f, I>,
   root_curr: usize,
   /// Which inputs have been seen thus far
   inputs: [I; N],
-  items: [(u32, usize, Node<'f>); N],
+  items: [(u32, usize, Node<'f, I>); N],
   curr_len: usize,
 }
 
@@ -32,7 +30,7 @@ where
   Bytes<O>: Deserialize,
   Bytes<I>: Deserialize,
   [I; N]: LengthAtMost32,
-  [(u32, usize, Node<'f>); N]: LengthAtMost32,
+  [(u32, usize, Node<'f, I>); N]: LengthAtMost32,
 {
   type Item = ([I; N], O);
   #[inline]
@@ -81,7 +79,7 @@ where
   Bytes<O>: Deserialize,
   Bytes<I>: Deserialize,
   [I; N]: LengthAtMost32,
-  [(u32, usize, Node<'f>); N]: LengthAtMost32,
+  [(u32, usize, Node<'f, I>); N]: LengthAtMost32,
 {
   #[inline]
   pub fn iter(&'f self) -> Iter<'f, D, I, O, N> {

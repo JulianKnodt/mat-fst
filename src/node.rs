@@ -3,17 +3,13 @@ use crate::{
   bytes::*,
   fst::{u64_to_usize, CompiledAddr, Transition, END_ADDRESS},
   input::Input,
-  output::Output,
 };
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use std::{
-  convert::TryInto,
   io::{self, Write},
-  iter::{once, Once},
   marker::PhantomData,
   mem::size_of,
-  ops::Range,
 };
 
 impl<I: Input> BuilderNode<I>
@@ -25,7 +21,7 @@ where
     &self,
     dst: &mut W,
     is_final: bool,
-    last_addr: CompiledAddr,
+    _last_addr: CompiledAddr,
     addr: CompiledAddr,
   ) -> io::Result<()> {
     assert!(self.transitions.len() <= I::max_value().as_usize());
@@ -38,7 +34,8 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Node<'a> {
+pub struct Node<'a, I> {
+  _input_type: PhantomData<I>,
   /// Slice over start to last addr of this node
   data: &'a [u8],
   // TODO make this state into one byte?
@@ -49,10 +46,11 @@ pub struct Node<'a> {
   sizes: IOSize,
 }
 
-impl<'f> Node<'f> {
-  pub fn new<I: Input>(addr: CompiledAddr, data: &[u8]) -> Node<'_>
-  where
-    Bytes<I>: Deserialize, {
+impl<'f, I: Input> Node<'f, I>
+where
+  Bytes<I>: Deserialize,
+{
+  pub fn new(addr: CompiledAddr, data: &[u8]) -> Node<'_, I> {
     if addr == END_ADDRESS {
       return Self::empty_final();
     }
@@ -61,6 +59,7 @@ impl<'f> Node<'f> {
     let sizes = s.sizes(data);
     let num_trans = s.num_trans::<I>(data);
     Node {
+      _input_type: PhantomData,
       data,
       state: s,
       end: s.end_addr::<I>(data, sizes, num_trans),
@@ -70,8 +69,9 @@ impl<'f> Node<'f> {
   }
   /// Returns a placeholder node which is intended to be used as a default node
   /// with bad values
-  fn empty_final() -> Node<'static> {
+  fn empty_final() -> Node<'static, I> {
     Node {
+      _input_type: PhantomData,
       data: &[],
       state: Striated(0),
       end: END_ADDRESS,
@@ -79,55 +79,46 @@ impl<'f> Node<'f> {
       sizes: IOSize::new(),
     }
   }
-  pub fn placeholder() -> Node<'static> { Self::empty_final() }
+  pub fn placeholder() -> Node<'static, I> { Self::empty_final() }
   /// Gets the ith transition for this node
-  pub(crate) fn transition<I: Input>(&self, i: usize) -> Transition<I>
-  where
-    Bytes<I>: Deserialize, {
-    self.state.transition(&self, i)
-  }
+  pub(crate) fn transition(&self, i: usize) -> Transition<I> { self.state.transition(&self, i) }
   /// Returns which # input/transition this byte is if it exists or none otherwise
   #[inline]
-  pub(crate) fn find_input<I: Input>(&self, b: I) -> Option<usize>
-  where
-    Bytes<I>: Deserialize, {
+  pub(crate) fn find_input(&self, b: I) -> Option<usize> {
     self.state.trans_iter::<I>(self).position(|t| t.input == b)
   }
   #[inline]
-  pub fn trans_iter<'a, I: Input + 'a>(&'a self) -> impl Iterator<Item = Transition<I>> + 'a
+  pub fn trans_iter<'a>(&'a self) -> impl Iterator<Item = Transition<I>> + 'a
   where
-    Bytes<I>: Deserialize, {
+    I: 'a, {
     self.state.trans_iter(&self)
   }
   #[inline]
-  pub fn range_iter<'a, I: Input + 'a>(&'a self) -> impl Iterator<Item = Transition<I>> + 'a
+  pub fn range_iter<'a>(&'a self) -> impl Iterator<Item = Transition<I>> + 'a
   where
-    Bytes<I>: Deserialize, {
+    I: 'a, {
     self.state.range_iter(&self)
   }
   #[cfg(feature = "parallel")]
-  pub fn par_trans_iter<'a, I: Input + 'a>(
-    &'a self,
-  ) -> impl ParallelIterator<Item = Transition<I>> + 'a
+  pub fn par_trans_iter<'a>(&'a self) -> impl ParallelIterator<Item = Transition<I>> + 'a
   where
-    Bytes<I>: Deserialize, {
+    I: 'a, {
     self.state.par_trans_iter(&self)
   }
   #[cfg(feature = "parallel")]
-  pub fn par_range_iter<'a, I: Input + 'a>(
-    &'a self,
-  ) -> impl ParallelIterator<Item = Transition<I>> + 'a
+  pub fn par_range_iter<'a>(&'a self) -> impl ParallelIterator<Item = Transition<I>> + 'a
   where
-    Bytes<I>: Deserialize, {
+    I: 'a, {
     self.state.par_range_iter(&self)
   }
+  pub fn next_sibling(&self) -> Node<'f, I> { Node::new(self.end, self.data) }
 }
 
-fn is_range_iter<V: Iterator<Item = u32>>(mut vs: V) -> bool {
+fn is_range_iter<V: Iterator<Item = u32>>(vs: V) -> bool {
   vs.enumerate().all(|(i, v)| v == i as u32)
 }
 
-fn mismatches<I: Input, V: Iterator<Item = I>>(mut is: V) -> impl Iterator<Item = I> {
+fn mismatches<I: Input, V: Iterator<Item = I>>(is: V) -> impl Iterator<Item = I> {
   let mut mismatch = 0;
   is.enumerate().filter_map(move |(i, v)| {
     if i + mismatch == v.as_usize() {
@@ -236,21 +227,21 @@ impl Striated {
   }
   const fn input_bytes(self) -> usize { ((self.0 & SIZE_MASK) >> 5) as usize }
   /// gets the ith transition of this node
-  pub fn transition<I: Input>(self, node: &Node<'_>, i: usize) -> Transition<I>
+  pub fn transition<I: Input>(self, node: &Node<'_, I>, i: usize) -> Transition<I>
   where
     Bytes<I>: Deserialize, {
     let obytes = node.sizes.output_bytes();
     let tbytes = node.sizes.transition_bytes();
     let ibytes = self.input_bytes();
     let trans_size = ibytes + obytes + tbytes;
-    let mut at = node.data.len()
+    let at = node.data.len()
       - 1
       - self.num_trans_len()
       - 1 // IOSize
       - trans_size * (i+1);
     let reader = &mut &node.data[at..];
     let input = if self.is_input_range() {
-      at += ibytes;
+      assert_eq!(ibytes, 0);
       I::from_usize(i)
     } else {
       Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
@@ -270,7 +261,7 @@ impl Striated {
   #[inline]
   pub fn trans_iter<'a, I: Input>(
     self,
-    node: &'a Node<'_>,
+    node: &'a Node<'_, I>,
   ) -> impl Iterator<Item = Transition<I>> + 'a
   where
     Bytes<I>: Deserialize, {
@@ -311,7 +302,7 @@ impl Striated {
   #[inline]
   pub fn range_iter<'a, I: Input>(
     self,
-    node: &'a Node<'_>,
+    node: &'a Node<'_, I>,
   ) -> impl Iterator<Item = Transition<I>> + 'a
   where
     Bytes<I>: Deserialize, {
@@ -340,7 +331,7 @@ impl Striated {
   #[cfg(feature = "parallel")]
   pub fn par_trans_iter<'a, I: Input>(
     self,
-    node: &'a Node<'_>,
+    node: &'a Node<'_, I>,
   ) -> impl ParallelIterator<Item = Transition<I>> + 'a
   where
     Bytes<I>: Deserialize, {
@@ -375,7 +366,7 @@ impl Striated {
   #[cfg(feature = "parallel")]
   pub fn par_range_iter<'a, I: Input>(
     self,
-    node: &'a Node<'_>,
+    node: &'a Node<'_, I>,
   ) -> impl ParallelIterator<Item = Transition<I>> + 'a
   where
     Bytes<I>: Deserialize, {
@@ -402,29 +393,29 @@ impl Striated {
 /// Ranges of values: [1, 8] | [0, 8] |1, 2]
 /// All 0 indicates that there are no transitions or outputs.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct IOSize(u8);
+pub(crate) struct IOSize(u8);
 impl IOSize {
   const TRANS_MASK: u8 = 0b1111_0000;
   const OUT_MASK: u8 = 0b000_1111;
   const fn new() -> Self { Self(0) }
-  fn sizes(obytes: u8, tbytes: u8) -> Self {
+  pub fn sizes(obytes: u8, tbytes: u8) -> Self {
     let mut out = Self::new();
     out.set_output_bytes(obytes);
     out.set_transition_bytes(tbytes);
     out
   }
-  fn set_transition_bytes(&mut self, size: u8) {
+  pub fn set_transition_bytes(&mut self, size: u8) {
     assert!(size <= 8, "Cannot encode transition larger than 8 bytes");
     self.0 = (self.0 & !IOSize::TRANS_MASK) | (size << 4);
   }
-  fn transition_bytes(self) -> usize { ((self.0 & IOSize::TRANS_MASK) >> 4) as usize }
-  fn set_output_bytes(&mut self, size: u8) {
+  pub fn transition_bytes(self) -> usize { ((self.0 & IOSize::TRANS_MASK) >> 4) as usize }
+  pub fn set_output_bytes(&mut self, size: u8) {
     assert!(size <= 8, "Cannot encode output size larger than 8 bytes");
     self.0 = (self.0 & !IOSize::OUT_MASK) | size;
   }
-  fn output_bytes(self) -> usize { (self.0 & IOSize::OUT_MASK) as usize }
-  fn encode(self) -> u8 { self.0 }
-  fn decode(v: u8) -> Self { Self(v) }
+  pub fn output_bytes(self) -> usize { (self.0 & IOSize::OUT_MASK) as usize }
+  pub fn encode(self) -> u8 { self.0 }
+  pub fn decode(v: u8) -> Self { Self(v) }
 }
 
 #[cfg(test)]
@@ -449,7 +440,7 @@ mod iosize_tests {
 
 /// Returns the necessary amount to go from trans address to node address
 #[inline]
-fn delta(node_addr: CompiledAddr, trans_addr: CompiledAddr) -> usize {
+pub(crate) fn delta(node_addr: CompiledAddr, trans_addr: CompiledAddr) -> usize {
   if trans_addr == END_ADDRESS {
     END_ADDRESS
   } else {
@@ -460,7 +451,7 @@ fn delta(node_addr: CompiledAddr, trans_addr: CompiledAddr) -> usize {
 /// Takes an address for a node and some delta to a transition and returns that transitions
 /// address, or END_ADDRESS if there is no transition
 #[inline]
-fn undo_delta(node_addr: CompiledAddr, delta: u64) -> CompiledAddr {
+pub(crate) fn undo_delta(node_addr: CompiledAddr, delta: u64) -> CompiledAddr {
   let delta: usize = u64_to_usize(delta);
   if delta == END_ADDRESS {
     END_ADDRESS
@@ -468,7 +459,6 @@ fn undo_delta(node_addr: CompiledAddr, delta: u64) -> CompiledAddr {
     node_addr - delta
   }
 }
-
 // Instead of creating a node just create an iterator over transitions
 // removing the intermediate node structure.
 pub fn immediate_iter<I: Input>(
@@ -528,13 +518,12 @@ where
   assert_ne!(addr, END_ADDRESS, "Cannot iterate over end address");
   let s = Striated(data[addr]);
   let data = &data[..addr + 1];
-  let sizes = s.sizes(data);
   let num_trans = s.num_trans::<I>(data);
   assert!(s.is_range());
   assert!(!s.is_input_range());
   let ibytes = s.input_bytes();
   let mut at = addr - s.num_trans_len() - 1;
-  (0..num_trans).map(move |i| {
+  (0..num_trans).map(move |_| {
     at -= ibytes;
     let reader = &mut &data[at..];
     Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
@@ -612,3 +601,4 @@ where
     Bytes::<I>::read_le(reader, ibytes as u8).unwrap().inner()
   })
 }
+

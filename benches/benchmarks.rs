@@ -1,16 +1,12 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use num::One;
-use sparse_mat::{dense::Dense, matrix::Matrix, output::FiniteFloat};
+use sparse_mat::{dense::Dense, matrix::Matrix, output::FiniteFloat, util::compute_threshold};
 use std::{
   fs::File,
   io::{BufRead, BufReader},
   path::Path,
   time::Duration,
 };
-
-// 0.005 works p well
-// 0.05 hits a lot of edge cases
-const TEN_P_THRESH: f32 = 0.031094962;
 
 fn file() -> File {
   let p = Path::new(file!())
@@ -45,22 +41,43 @@ fn load_matrix(thresh: f32) -> Matrix<Vec<u8>, u16, FiniteFloat<f32>, 2> {
   Matrix::new([1024u16, 512], entries)
 }
 
+fn items() -> Vec<FiniteFloat<f32>> {
+  let f = file();
+  let buf = BufReader::new(f);
+  buf.lines().filter_map(|line| {
+    let line = line.ok()?;
+    let mut parts = line.split_whitespace();
+    parts.next()?;
+    parts.next()?;
+    let v = parts.next().unwrap();
+    let v = v.parse::<f32>().unwrap();
+    Some(FiniteFloat::new(v))
+  }).collect()
+}
+
 pub fn fst(c: &mut Criterion) {
   let vec = [FiniteFloat::new(1.0); 512];
-  c.bench_function("fst vecmul low nnz", |b| {
-    let mat = load_matrix(0.05);
-    let mut out = vec![FiniteFloat::new(0.0); 1024];
-    b.iter(|| {
-      mat.vecmul_into(black_box(&vec), &mut out);
-    })
-  });
-  c.bench_function("fst vecmul high nnz", |b| {
-    let mat = load_matrix(TEN_P_THRESH);
-    let mut out = vec![FiniteFloat::new(0.0); 1024];
-    b.iter(|| {
-      mat.vecmul_into(black_box(&vec), &mut out);
-    })
-  });
+  let is = items();
+  let thresholds = [0.10, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.15, 0.1, 0.05, 0.01];
+  for &t in &thresholds {
+    let abs_thresh = compute_threshold(is.iter(), t);
+    let name = format!("fst vecmul {} sparsity", t);
+    let mat = load_matrix(abs_thresh.inner());
+    c.bench_function(name.as_str(), |b| {
+      let mut out = vec![FiniteFloat::new(0.0); 1024];
+      b.iter(|| {
+        mat.vecmul_into(black_box(&vec), &mut out);
+      })
+    });
+    let name = format!("csr vecmul {} sparsity", t);
+    let mat = mat.to_coo().to_csr();
+    c.bench_function(name.as_str(), |b| {
+      let mut out = vec![FiniteFloat::new(0.0); 1024];
+      b.iter(|| {
+        mat.vecmul_into(black_box(&vec), &mut out);
+      })
+    });
+  }
   c.bench_function("fst convolve 5x5 kernel low nnz", |b| {
     let mat = load_matrix(0.05);
     let mut out = Dense::new(mat.dims);

@@ -1,17 +1,14 @@
 use crate::output::FiniteFloat;
-use num::Float;
 use std::{
-  convert::TryInto,
   io::{self, Read, Write},
-  marker::PhantomData,
   mem::size_of,
 };
 
 pub trait Serialize: Sized {
   /// Returns the number of bytes written on serialization
   fn write_le<W: Write>(self, dst: &mut W) -> io::Result<u8>;
-  fn pack<W: Write>(self, dst: &mut W) -> io::Result<u8> { todo!() }
-  fn pack_to<W: Write>(self, size: u8, dst: &mut W) -> io::Result<()> { todo!() }
+  fn pack<W: Write>(self, _: &mut W) -> io::Result<u8> { todo!() }
+  fn pack_to<W: Write>(self, _: u8, _: &mut W) -> io::Result<()> { todo!() }
 }
 
 pub trait Deserialize: Sized {
@@ -82,7 +79,7 @@ impl Serialize for Bytes<FiniteFloat<f32>> {
 
 impl Deserialize for Bytes<f32> {
   fn read_le<R: Read>(from: &mut R, n: u8) -> io::Result<Self> {
-    // assert!(n <= 4);
+    assert!(n <= 4);
     let mut buf = [0; 4];
     from.read_exact(&mut buf)?;
     Ok(f32::from_le_bytes(buf).into())

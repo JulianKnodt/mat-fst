@@ -16,9 +16,9 @@ fn compute_raw_index<I: Input, const N: usize>(idx: [I; N], dims: [I; N]) -> usi
   pos
 }
 
-fn invert_raw_index<I: Input, const N: usize>(raw: usize, dims: [I; N]) -> [I; N] {
+pub fn invert_raw_index<I: Input, const N: usize>(raw: usize, dims: [I; N]) -> [I; N] {
   let mut out = [I::zero(); N];
-  let mut curr = raw;
+  let curr = raw;
   let mut mul = 1;
   for i in (0..N).rev() {
     out[i] = I::from_usize((curr / mul) % dims[i].as_usize());

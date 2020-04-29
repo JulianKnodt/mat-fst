@@ -19,7 +19,7 @@ where
   [I; N]: LengthAtMost32,
   [I; P]: LengthAtMost32, {
   matrix: &'f Matrix<D, I, O, N>,
-  node: Node<'f>,
+  node: Node<'f, I>,
   /// The current output value
   curr_out: u32,
 }

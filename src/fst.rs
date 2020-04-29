@@ -67,13 +67,13 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
     let mut out = 0u32;
     for &b in &key[..key.len() - 1] {
       node = node.find_input(b).map(|i| {
-        let t = node.transition::<I>(i);
+        let t = node.transition(i);
         out = out.cat(&t.num_out);
         self.node(t.addr)
       })?;
     }
     node.find_input(key[key.len() - 1]).map(|i| {
-      let t = node.transition::<I>(i);
+      let t = node.transition(i);
       out = out.cat(&t.num_out);
     })?;
     Some(self.outputs[out as usize])
@@ -84,7 +84,7 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
     let mut node = self.root();
     for &b in key {
       let next = node.find_input(b).map(|i| {
-        let t: Transition<I> = node.transition::<I>(i);
+        let t: Transition<I> = node.transition(i);
         self.node(t.addr)
       });
       node = if let Some(node) = next {
@@ -95,15 +95,15 @@ impl<D: AsRef<[u8]>, I: Input, O: Output> Fst<D, I, O> {
     }
     true
   }
-  pub(crate) fn root(&self) -> Node<'_>
+  pub(crate) fn root(&self) -> Node<'_, I>
   where
     Bytes<I>: Deserialize, {
     self.node(self.meta.root_addr)
   }
-  pub(crate) fn node(&self, addr: CompiledAddr) -> Node<'_>
+  pub(crate) fn node(&self, addr: CompiledAddr) -> Node<'_, I>
   where
     Bytes<I>: Deserialize, {
-    Node::new::<I>(addr, &self.data.as_ref())
+    Node::new(addr, &self.data.as_ref())
   }
   pub fn len(&self) -> usize { self.meta.len }
   pub fn is_empty(&self) -> bool { self.len() == 0 }

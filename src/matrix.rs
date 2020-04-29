@@ -9,12 +9,12 @@ use crate::{
   output::Output,
   util::within,
 };
-use num::{One, Zero};
+use num::One;
 use std::{
   array::LengthAtMost32,
   cmp::Ordering,
   mem::replace,
-  ops::{Index, Mul, RangeBounds, Sub},
+  ops::{Mul, Sub},
 };
 
 #[derive(Debug)]
@@ -60,7 +60,7 @@ where
   Bytes<I>: Deserialize,
 {
   #[inline]
-  fn get(&self, idxs: [I; 2]) -> O { self.data.get(&idxs[..]).unwrap_or_else(O::zero) }
+  pub fn get(&self, idxs: [I; 2]) -> O { self.data.get(&idxs[..]).unwrap_or_else(O::zero) }
   /// Performs vector multiplication of this matrix with some dense vector
   #[inline]
   pub fn vecmul(&self, vec: &[O]) -> Vec<O> {
@@ -105,9 +105,9 @@ where
 {
   pub fn hadamard<'a>(&'a self, o: &'a Self) -> Matrix<Vec<u8>, I, O, N>
   where
-    [(u32, usize, Node<'a>); N]: LengthAtMost32, {
+    [(u32, usize, Node<'a, I>); N]: LengthAtMost32, {
     assert_eq!(self.shape(), o.shape());
-    let mut a = self.iter();
+    let a = self.iter();
     let mut b = self.iter().peekable();
     let mut builder = Builder::memory().unwrap();
     for (i_a, o_a) in a {
@@ -145,7 +145,7 @@ where
   }
   pub fn transpose<'a>(&'a self) -> Matrix<Vec<u8>, I, O, N>
   where
-    [(u32, usize, Node<'a>); N]: LengthAtMost32, {
+    [(u32, usize, Node<'a, I>); N]: LengthAtMost32, {
     let mut inv_items = Vec::with_capacity(self.data.len());
     inv_items.extend(self.iter().map(|(mut i, o)| {
       i.reverse();
@@ -154,7 +154,7 @@ where
     // TODO This is expensive? Work on a way to make this cheaper
     inv_items.sort_unstable_by_key(|&(i, _)| i);
     let mut out = Builder::memory().unwrap();
-    for (mut i, o) in inv_items {
+    for (i, o) in inv_items {
       out.insert(i, o).unwrap();
     }
     let mut dims = self.shape();
@@ -184,7 +184,7 @@ where
     if rhs.data.is_empty() || self.data.is_empty() {
       // handle simple case where
       let dims = [self.shape()[0], rhs.shape()[1]];
-      let mut out: Builder<_, _, _, 2> = Builder::memory().unwrap();
+      let out: Builder<_, _, _, 2> = Builder::memory().unwrap();
       let data = out.into_fst();
       return Matrix { dims, data };
     }
@@ -209,8 +209,6 @@ where
       "Mismatched matmul dimensions"
     );
     let rows = self.shape()[0];
-    let cols = rhs_t.shape()[0];
-    let dims = [rows, cols];
     if rhs_t.data.is_empty() || self.data.is_empty() {
       return;
     }
@@ -239,7 +237,7 @@ where
         assert!(x >= curr_x);
         if x > curr_x {
           if !acc.is_zero() {
-            out.insert([curr_row, curr_x], acc);
+            out.insert([curr_row, curr_x], acc).unwrap();
           }
           acc = o * row_buf[y.as_usize()];
           curr_x = x;
@@ -248,62 +246,13 @@ where
         }
       }
       if !acc.is_zero() {
-        out.insert([curr_row, curr_x], acc);
+        out.insert([curr_row, curr_x], acc).unwrap();
       }
 
       // go on to next row
       curr_row = curr_row + I::one();
     }
   }
-  /// Convolves this matrix row-wise by the kernel
-  /// To convolve columnwise, transpose this matrix then convolve.
-  pub fn convolve_1d<const K: usize>(&self, kernel: [O; K]) -> Matrix<Vec<u8>, I, O, 2>
-  where
-    I: Sub<Output = I>, {
-    use crate::circ_buf::CircularBuffer;
-    assert!(K > 0);
-    let mut out = Builder::memory().unwrap();
-    // circular buffer of items
-    let mut buf: CircularBuffer<O, K> = CircularBuffer::new(O::zero());
-
-    // this is the x coordinate of the last value in the circular buffer
-    let mut last_x = I::zero();
-    let mut curr_row = I::zero();
-
-    for ([y, x], o) in self.iter() {
-      assert!(y >= curr_row);
-      if y > curr_row {
-        for (i, v) in buf.shift(K, O::zero()).enumerate() {
-          if let Some(i) = (last_x.as_usize() + i).checked_sub(K) {
-            out.insert([curr_row, I::from_usize(i)], v);
-          }
-        }
-        last_x = x;
-        curr_row = y;
-      }
-      assert!(x >= last_x);
-      let diff = x - last_x;
-      for (i, v) in buf.shift(diff.as_usize(), O::zero()).enumerate() {
-        if let Some(i) = (last_x.as_usize() + i).checked_sub(K) {
-          out.insert([curr_row, I::from_usize(i)], v);
-        }
-      }
-      last_x = x;
-      for i in 0..K {
-        buf.set(i, buf.get(i) + kernel[K - i - 1] * o);
-      }
-    }
-    for (i, v) in buf.shift(K, O::zero()).enumerate() {
-      if let Some(i) = (last_x.as_usize() + i).checked_sub(K) {
-        out.insert([curr_row, I::from_usize(i)], v);
-      }
-    }
-    Matrix {
-      dims: self.shape(),
-      data: out.into_fst(),
-    }
-  }
-
   pub fn convolve_2d<const K: usize>(&self, kernel: [[O; K]; K]) -> Dense<I, O, 2>
   where
     I: Sub<Output = I>, {
@@ -355,7 +304,7 @@ where
       for i in 0..K {
         for j in 0..K {
           let v = kernel[K - i - 1][K - j - 1];
-          let mut item = buf.entry([i, j]);
+          let item = buf.entry([i, j]);
           *item = *item + v * o;
         }
       }
@@ -430,7 +379,7 @@ where
 {
   pub fn to_coo<'a>(&'a self) -> COO<I, O, N>
   where
-    [(u32, usize, Node<'a>); N]: LengthAtMost32, {
+    [(u32, usize, Node<'a, I>); N]: LengthAtMost32, {
     COO::from_iter(self.dims, self.iter())
   }
 }

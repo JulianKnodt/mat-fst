@@ -9,7 +9,7 @@ use crate::{
 use num::Zero;
 use std::{
   collections::{hash_map::Entry, HashMap},
-  io::{self, Write},
+  io::Write,
 };
 
 pub const MAGIC_NUMBER: u64 = 0xFD15EA5E;
@@ -179,7 +179,7 @@ where
   Bytes<I>: Serialize,
   Bytes<O>: Serialize,
 {
-  pub fn new(mut w: W) -> Result<Self, I> {
+  pub fn new(w: W) -> Result<Self, I> {
     let mut wtr = CountingWriter::new(w);
     // Write a magic number to ensure that the first few bytes are not addressable by the rest
     Bytes(MAGIC_NUMBER).write_le(&mut wtr)?;
@@ -280,7 +280,7 @@ where
     self.wtr.flush()?;
     Ok(self.wtr.inner())
   }
-  fn finish(self) -> Result<(), I> { self.into_inner().map(|_| ()) }
+  pub fn finish(self) -> Result<(), I> { self.into_inner().map(|_| ()) }
 }
 
 /// Testing construction of the fst but not operations that read from it

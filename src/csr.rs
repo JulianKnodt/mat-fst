@@ -1,5 +1,5 @@
-use crate::{bytes::*, input::Input, matrix::Matrix, output::Output, util::within};
-use std::{array::LengthAtMost32, collections::BTreeMap, mem::size_of, ops::Mul};
+use crate::{input::Input, output::Output};
+use std::{mem::size_of, ops::Mul};
 
 #[derive(Debug)]
 pub struct CSR<I, O> {

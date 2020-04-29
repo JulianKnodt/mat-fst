@@ -14,12 +14,14 @@ impl<W: Write> CountingWriter<W> {
   pub fn inner(self) -> W { self.wtr }
 }
 
+/*
 impl CountingWriter<Vec<u8>> {
-  pub fn reset(&mut self) {
+  pub(crate) fn reset(&mut self) {
     self.wtr.clear();
     self.count = 0;
   }
 }
+*/
 
 impl<W: Write> Write for CountingWriter<W> {
   fn write(&mut self, buf: &[u8]) -> io::Result<usize> {

@@ -1,3 +1,4 @@
+/*
 /// A circular buffer of fixed size
 pub struct CircularBuffer<T, const L: usize> {
   items: [T; L],
@@ -35,6 +36,7 @@ impl<T: Copy, const L: usize> CircularBuffer<T, L> {
     })
   }
 }
+*/
 
 /// A 2 dimensional square circular buffer
 pub struct CircularBuffer2D<T, const L: usize> {
@@ -50,40 +52,13 @@ impl<T: Copy, const L: usize> CircularBuffer2D<T, L> {
     }
   }
   #[inline]
-  pub fn get(&self, c: [usize; 2]) -> T {
-    let [c0, c1] = c;
-    assert!(c0 < L && c1 < L);
-    let [s0, s1] = self.start_coord;
-    self.items[(c0 + s0) % L][(c1 + s1) % L]
-  }
-  #[inline]
-  pub fn set(&mut self, c: [usize; 2], t: T) {
-    let [c0, c1] = c;
-    assert!(c0 < L && c1 < L);
-    let [s0, s1] = self.start_coord;
-    self.items[(c0 + s0) % L][(c1 + s1) % L] = t;
-  }
   pub fn entry(&mut self, c: [usize; 2]) -> &mut T {
     let [c0, c1] = c;
     assert!(c0 < L && c1 < L);
     let [s0, s1] = self.start_coord;
     &mut self.items[(c0 + s0) % L][(c1 + s1) % L]
   }
-
-  /// Gets item covered if a certain range of this iterator was shifted
-  pub fn covered(&self, c: [usize; 2]) -> impl Iterator<Item = ([usize; 2], T)> + '_ {
-    let [c0, c1] = c;
-    let c0 = c0.min(L);
-    let c1 = c1.min(L);
-    let [s0, s1] = self.start_coord;
-    (0..c0)
-      .flat_map(move |y| (0..L).map(move |x| ([y, x], self.items[(s0 + y) % L][(s1 + x) % L])))
-      .chain(
-        (c0..L).flat_map(move |y| {
-          (0..c1).map(move |x| ([y, x], self.items[(s0 + y) % L][(s1 + x) % L]))
-        }),
-      )
-  }
+  /*
   pub fn shift(&mut self, c: [usize; 2], def: T) {
     let [c0, c1] = c;
     let c0 = c0.min(L);
@@ -101,6 +76,7 @@ impl<T: Copy, const L: usize> CircularBuffer2D<T, L> {
       }
     }
   }
+  */
   pub fn eager_shift_modify<F>(&mut self, c: [usize; 2], mut f: F)
   where
     F: FnMut(usize, usize, &mut T), {

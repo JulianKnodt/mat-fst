@@ -2,7 +2,6 @@ use crate::{
   build::Builder,
   output::{FiniteFloat, Unit},
 };
-use num::{One, Zero};
 
 #[test]
 fn one_unit() {

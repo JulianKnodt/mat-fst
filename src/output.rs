@@ -5,7 +5,6 @@ use std::{
   cmp,
   fmt::Debug,
   hash::{Hash, Hasher},
-  mem::transmute,
   ops::{Add, Mul, Sub},
 };
 
@@ -118,8 +117,7 @@ impl<T: Float> FiniteFloat<T> {
 impl<T: Float + Debug> Prefix for FiniteFloat<T> {
   fn prefix(&self, o: &Self) -> Self {
     // which strategy works best?
-    // FiniteFloat::new(self.0.min(o.0))
-    FiniteFloat::zero()
+    FiniteFloat::new(self.0.min(o.0))
   }
 }
 impl<T: Float + Debug> Output for FiniteFloat<T>
@@ -180,8 +178,8 @@ impl Zero for Unit {
   fn is_zero(&self) -> bool { true }
 }
 impl Output for Unit {
-  fn cat(&self, o: &Self) -> Self { Unit }
-  fn rm_pre(&self, o: &Self) -> Self { Unit }
+  fn cat(&self, _: &Self) -> Self { Unit }
+  fn rm_pre(&self, _: &Self) -> Self { Unit }
 }
 impl Prefix for Unit {
   fn prefix(&self, _: &Self) -> Self { Unit }
