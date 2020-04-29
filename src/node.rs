@@ -172,7 +172,8 @@ impl Striated {
         });
     let is_range = is_range_iter(node.transitions.iter().map(|v| v.num_out));
     // can only have one of is_range and is_input_range currently
-    let is_input_range = !is_range && mismatches(node.transitions.iter().map(|v| v.input)).count() == 0;
+    let is_input_range =
+      !is_range && mismatches(node.transitions.iter().map(|v| v.input)).count() == 0;
     let ibytes = if is_input_range { 0 } else { ibytes };
     let obytes = if !is_range && any_outs { obytes } else { 0 };
     let iosize = IOSize::sizes(obytes, tbytes);
@@ -210,8 +211,7 @@ impl Striated {
     let len = self.num_trans_len();
     Bytes::<u32>::read_le(&mut &data[data.len() - 1 - len..], len as u8)
       .unwrap()
-      .inner()
-      as usize
+      .inner() as usize
       + 1
   }
   fn end_addr<I: Input>(self, data: &[u8], sizes: IOSize, num_trans: usize) -> CompiledAddr {
