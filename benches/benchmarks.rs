@@ -1,6 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use num::One;
-use sparse_mat::{dense::Dense, matrix::Matrix, output::FiniteFloat, util::compute_threshold};
+use criterion::{black_box, criterion_group, criterion_main, Criterion,
+BenchmarkId,
+};
+use sparse_mat::{matrix::Matrix, output::FiniteFloat, util::compute_threshold};
 use std::{
   fs::File,
   io::{BufRead, BufReader},
@@ -60,35 +61,37 @@ fn items() -> Vec<FiniteFloat<f32>> {
 
 pub fn fst(c: &mut Criterion) {
   let vec = [FiniteFloat::new(1.0); 512];
+  let mut group = c.benchmark_group("vecmul");
   let is = items();
   let thresholds = [
     0.3, 0.2, 0.10, 0.09, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02, 0.015, 0.01, 0.005, 0.001,
   ];
   for &t in &thresholds {
     let abs_thresh = compute_threshold(is.iter(), t);
-    let name = format!("fst vecmul {} sparsity", t);
-    let mat = load_matrix(abs_thresh.inner());
-    c.bench_function(name.as_str(), |b| {
+    let mat = load_matrix(abs_thresh.inner().abs());
+    group.bench_with_input(BenchmarkId::new("fst vecmul", t), &t,
+      |b, _| {
       let mut out = vec![FiniteFloat::new(0.0); 1024];
       b.iter(|| {
         mat.vecmul_into(black_box(&vec), &mut out);
       })
     });
-    let name = format!("csr vecmul {} sparsity", t);
     let mat = mat.to_coo().to_csr();
-    c.bench_function(name.as_str(), |b| {
+    group.bench_with_input(BenchmarkId::new("csr vecmul", t), &t, |b, _| {
       let mut out = vec![FiniteFloat::new(0.0); 1024];
       b.iter(|| {
         mat.vecmul_into(black_box(&vec), &mut out);
       })
     });
   }
+  /*
   c.bench_function("fst convolve 5x5 kernel low nnz", |b| {
     let mat = load_matrix(0.05);
     let mut out = Dense::new(mat.dims);
     let kernel = [[FiniteFloat::one(); 5]; 5];
     b.iter(|| mat.convolve_2d_into(black_box(kernel), &mut out))
   });
+  */
 }
 
 criterion_group! {
