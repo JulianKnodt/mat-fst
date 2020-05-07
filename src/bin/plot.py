@@ -1,3 +1,5 @@
+#!/usr/local/bin/python3
+
 import matplotlib.pyplot as plt
 import numpy as np
 data = np.genfromtxt('sparsity.csv', delimiter=',')

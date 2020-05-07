@@ -4,6 +4,8 @@
 \usepackage{listings}
 \usepackage{hyperref}
 \usepackage{appendix}
+\usepackage{graphicx}
+\usepackage[margin=1in]{geometry}
 
 \lstset{
 language=C,
@@ -15,14 +17,16 @@ columns=fullflexible,
 showstringspaces=false
 }
 
+\title{\vspace{-1cm}Sparse Matrix Representation Using Finite State Transducers}
+\author{\vspace{-1cm}Julian Knodt}
+
 \setlength{\parindent}{0cm}
 \setlength{\parskip}{\baselineskip}
 \begin{document}
 
-\section*{Sparse Matrix Representation Final Report}
-\author*{Julian Knodt} \\
-\today \\
-Systems \& ML
+\maketitle
+Professor Kai Li \\
+COS 598D Systems \& ML
 
 \begin{abstract}
 Sparse Matrices are crucial for the efficient operation in many different contexts which lead to
@@ -64,9 +68,12 @@ efficiency.
 
 Traditionally, an ordered map might be represented by a binary tree key-value store. but this
 assumes keys and doesn't remove a ton of repetition. An alternate ordered map format is the
-\textit{Finite State Transducer}(FST), used for efficient prefix and suffix compression when storing a lot of
-strings. Consider indices into a matrix as strings, then it seems natural to use finite state
-transducers as a way to encode sparse matrices.
+\textit{Finite State Transducer}(FST), used for efficient prefix and suffix compression when
+storing a lot of strings. Consider indices into a matrix as strings, then it seems natural to
+use finite state transducers as a way to encode sparse matrices. Notably, they present extremely
+efficient compaction of large sets of strings, while having little overhead for having a diverse
+set of strings with little overlap. Memory efficiency, while not directly correlated to speed,
+tends to lend itself to fast iteration.
 
 Some notable differences between a general finite state transducer and one used to encode a
 matrix is that for a matrix every key's length is fixed and known ahead of time, thus we can
@@ -92,9 +99,61 @@ BLAS optimizations\footnote{For a more efficient BLAS implementation, see
 {Intel's implementation}.} We choose not to compare to a BLAS implementation, as it would take
 significant engineering effort to implement something at the same level of efficiency. In general,
 we expect the time complexity to be the same, but there to be a constant factor increase.
-Therefore, it can be used to accurately benchmark our implementation and compare what it would
-look like if such.
+Therefore, the relative efficiency is an accurate measure of how an efficient variation of our
+proposed idea would compare our implementation to an efficient CSR implementation.
 
+Herein, we describe the major modifications made to the FST library, which primarily consist of
+reduction of complexity, denoting contiguous ranges of elements, and creating multiple iteration
+strategies.
+
+
+\subsection*{Reducing Complexity in the FST Library}
+
+Due to differing desires for a general purpose FST library and one designed for matrices,
+different trade-offs must be made in the underlying design. Specifically, additional costs at
+run-time might be alright if that leads to an improvement of the compression ratio. In our case,
+that trade-off is inverted, where lower run-time at the cost of increased efficiency is an
+acceptable trade-off. Due to that swapped expectation, we make some notable changes to the
+underlying library.
+
+% 1. Compile-time fixed sized input sequences
+% 2. Reduced compilation variants
+% 3. Generalized output types
+% 4. Striated element sequences
+
+\subsection*{Marking Contiguous Ranges}
+
+% TODO discuss why marking ranges as continuous was useful for iteration speed
+
+\subsection*{Iteration}
+
+% Discuss iteration using an explicit marker, parallel iteration, etc
+
+\section*{Experiments}
+
+All experiments were run on a machine on a Ubuntu Linux Machine, with 1 \textit{x86\_64} Intel
+i7-4770 CPU @ 3.4 GHz.
+
+We looked at matrices
+
+We find that for similar input sizes, the cost in number of bytes for CSR and our proposed
+format are near equivalent. As demonstrated in Figure \ref{fig:sparsity}. While not showing any
+significant gains over the CSR format, when looking at higher dimensional tensors we expect it
+to maintain a similar level of efficiency for sparsity.
+
+\begin{center}
+\begin{figure}
+  \includegraphics[width=\textwidth]{sparsity}
+  \caption{The number of bytes used between a CSR format and the proposed FST format does not
+differ. At extremely low sparsity, our format appears to be better, but since the overall
+cost is quite small this benefit might not be significant.}
+  \label{fig:sparsity}
+\end{figure}
+\end{center}
+
+
+
+\section*{Results}
 
 \appendix
 \section{General Notes}
@@ -111,5 +170,13 @@ matrix lead to inefficiency, as one could insert the values in the matrix into t
 end, I switched to just maintaining a pointer into a contiguous array of elements and that lead
 to a large performance gain because it meant in some cases I could mark elements as being ranges
 over contiguous blocks, leading to efficient iteration.
+
+\section{Convolution Algorithm with 2D Circular Buffer}
+While working on this project, I realized that introducing a 2D circular buffer as an
+intermediate buffer for partial sums reduces the
+number of writes to the backing array. While this is not especially notable in the case of
+convolving with one array, it might have some benefit when there are multiple writers, such as
+when performing convolution over multiple channels in parallel to reduce memory thrashing.
+
 
 \end{document}
