@@ -19,7 +19,7 @@ fn items() -> Vec<FiniteFloat<f32>> {
       parts.next()?;
       let v = parts.next().unwrap();
       let v = v.parse::<f32>().unwrap();
-      Some(FiniteFloat::new(v))
+      Some(FiniteFloat::new(v.abs()))
     })
     .collect()
 }
@@ -28,7 +28,7 @@ const THRESHOLD: f32 = 0.031_094_963;
 // 0.005 works p well
 // 0.05 hits a lot of edge cases
 
-fn main() {
+fn load_mat(thresh: f32) -> Matrix<Vec<u8>, u16, FiniteFloat<f32>, 2> {
   let file_name = "weights.txt";
   let file = File::open(file_name).unwrap();
   let buf = BufReader::new(file);
@@ -42,31 +42,25 @@ fn main() {
     let v = parts.next().unwrap();
     let v = v.parse::<f32>().unwrap();
     // return Some(FiniteFloat::new(v.abs()));
-    if v.abs() > THRESHOLD {
+    if v.abs() > thresh {
       Some(([y, x], FiniteFloat::new(v)))
     } else {
       None
     }
   });
+  Matrix::new([1024u16, 512], entries)
+}
 
+fn main() {
   let thresholds = [
-    0.3, 0.2, 0.10, 0.09, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02, 0.015, 0.01, 0.005, 0.001,
+    0.9, 0.5, 0.4, 0.3, 0.2, 0.10, 0.09, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02, 0.015, 0.01,
+    0.005, 0.0025, 0.001,
   ];
   let is = items();
   for &t in &thresholds {
-    let abs_thresh = compute_threshold(is.iter(), t);
-    println!("{:?}", abs_thresh);
+    let abs_thresh = compute_threshold(is.iter(), t).inner();
+    let mat = load_mat(abs_thresh);
+    let csr = mat.to_coo().to_csr();
+    println!("{}, {}, {}", t, mat.nbytes(), csr.nbytes());
   }
-  /*
-  let v = compute_threshold(entries, 0.90);
-  println!("{}", v.inner());
-  */
-  let mat = Matrix::new([1024u16, 512], entries);
-  println!("Sparsity {:#?}", mat.sparsity());
-  println!("mat len {}", mat.count_nonzero());
-  println!("mat shape {:?}", mat.shape());
-  println!("mat bytes {}", mat.nbytes());
-  let csr = mat.to_coo().to_csr();
-  println!("csr bytes {}", csr.nbytes());
-  println!("csr nnz {}", csr.count_nonzero());
 }

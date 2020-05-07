@@ -1,6 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion,
-BenchmarkId,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use sparse_mat::{matrix::Matrix, output::FiniteFloat, util::compute_threshold};
 use std::{
   fs::File,
@@ -69,15 +67,14 @@ pub fn fst(c: &mut Criterion) {
   for &t in &thresholds {
     let abs_thresh = compute_threshold(is.iter(), t);
     let mat = load_matrix(abs_thresh.inner().abs());
-    group.bench_with_input(BenchmarkId::new("fst vecmul", t), &t,
-      |b, _| {
+    group.bench_with_input(BenchmarkId::new("fst", t), &t, |b, _| {
       let mut out = vec![FiniteFloat::new(0.0); 1024];
       b.iter(|| {
         mat.vecmul_into(black_box(&vec), &mut out);
       })
     });
     let mat = mat.to_coo().to_csr();
-    group.bench_with_input(BenchmarkId::new("csr vecmul", t), &t, |b, _| {
+    group.bench_with_input(BenchmarkId::new("csr", t), &t, |b, _| {
       let mut out = vec![FiniteFloat::new(0.0); 1024];
       b.iter(|| {
         mat.vecmul_into(black_box(&vec), &mut out);

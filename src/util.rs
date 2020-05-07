@@ -8,7 +8,7 @@ pub fn compute_threshold<O: Ord + Copy, I: Iterator<Item = O>>(
     "Cannot compute sparsity greater than 1"
   );
   let mut items = items.collect::<Vec<_>>();
-  let dest_index = ((items.len() - 1) as f64 * target_sparsity).ceil() as usize;
+  let dest_index = ((items.len() - 1) as f64 * (1.0 - target_sparsity)).ceil() as usize;
   items.sort_unstable();
   items[dest_index]
 }

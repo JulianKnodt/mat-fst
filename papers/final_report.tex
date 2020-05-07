@@ -1,0 +1,115 @@
+\documentclass[12pt]{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{appendix}
+
+\lstset{
+language=C,
+basicstyle=\small\sffamily,
+numbers=left,
+numberstyle=\tiny,
+frame=tb,
+columns=fullflexible,
+showstringspaces=false
+}
+
+\setlength{\parindent}{0cm}
+\setlength{\parskip}{\baselineskip}
+\begin{document}
+
+\section*{Sparse Matrix Representation Final Report}
+\author*{Julian Knodt} \\
+\today \\
+Systems \& ML
+
+\begin{abstract}
+Sparse Matrices are crucial for the efficient operation in many different contexts which lead to
+dense operations such as in pruned neural nets or in sparse graph operations. Currently, there
+exist many different formats for sparse matrices, differing in efficiency of matrix operations
+and compression. Most popular among representations for unstructured sparse matrices are
+Compressed Sparse Row(CSR), Coordinate Order(COO), and Compressed Sparse Column(CSC). We explore
+an alternative unstructured sparse matrix format, based on a data structure commonly used in
+string processing, finite state transducers. We find that the proposed structure can be within
+an order of magnitude of efficiency on sparse matrix vector multiplication as compared to the
+CSR format, and equivalent compression size, and with sparsity above 0.005, gets better
+compression than CSR.
+\end{abstract}
+
+\section*{Introduction}
+Dense matrices in general provide a continuous map of indices to values. Continuous, in this
+case means that every index has a corresponding well-defined value. This is costly when the matrix has a
+lot of redundancy, specifically if a lot of elements are $0$. Sparse matrix formats remove the assumption
+of continuity in order to improve compression, and allow for faster iteration over non-zero
+elements. The utilization of sparsity is harder to optimize for than it may appear as a lot of
+performance gain for matrix operations is due to the easy parallelizability of elements for use
+in CPU SIMD operations or on GPUs, both of which are readily available in a dense matrix
+format. Yet, there are many applications from which sparse matrices naturally arise such as
+neural nets or social connection graphs, and the cost of representing them as dense matrices
+becomes increasingly costly. Sparse matrices thus become essential to feasibility and efficiency
+of many applications.
+
+\section*{Approach}
+
+Sparse matrices's API is much closer to that of an ordered map, in that most operations
+such as sparse vector-multiplication rely on efficient ordered iteration over the elements, and
+random access of elements might become more costly. CSR offers an extremely efficient way to
+perform iteration by representing rows implicitly as a series of pointers into column indices.
+While this approach works well for 2 dimensional tensors, generalizing it requires
+re-implementing it with another level of indirection, and it would not be immediately compatible
+with lower dimensional tensors. A more general sparse tensor representation should be able to
+generalize to higher dimensional tensors without reimplementation, ideally without loss of
+efficiency.
+
+Traditionally, an ordered map might be represented by a binary tree key-value store. but this
+assumes keys and doesn't remove a ton of repetition. An alternate ordered map format is the
+\textit{Finite State Transducer}(FST), used for efficient prefix and suffix compression when storing a lot of
+strings. Consider indices into a matrix as strings, then it seems natural to use finite state
+transducers as a way to encode sparse matrices.
+
+Some notable differences between a general finite state transducer and one used to encode a
+matrix is that for a matrix every key's length is fixed and known ahead of time, thus we can
+remove some of the dynamics elements in an FST such as checking whether a specific character is
+the end of a string or not. In addition, we seek to optimize iteration efficiency, whereas most
+FST's might look to optimize for flexibility of key search.
+
+We look to match the efficacy of CSR matrix-vector multiplication and matrix-matrix
+multiplication, but allow for easy representation of higher dimensional matrices.
+
+\section*{Implementation}
+
+We look at a CPU implementation of a finite state transducer with manual memory management for
+maximal control over efficiency. We modify an existing FST
+library\footnote{\url{https://github.com/BurntSushi/fst/tree/master}} and extend it to support
+arbitrary element types, as well as multiple different length input encodings (byte, short,
+int), and other modifications.
+
+In order to have some comparison, we implement a simple CSR
+format and compare to that. Notably, both the FST-backed and the CSR-backed versions do not have
+BLAS optimizations\footnote{For a more efficient BLAS implementation, see
+\href{https://software.intel.com/en-us/mkl-developer-reference-c-sparse-blas-csr-matrix-storage-format}
+{Intel's implementation}.} We choose not to compare to a BLAS implementation, as it would take
+significant engineering effort to implement something at the same level of efficiency. In general,
+we expect the time complexity to be the same, but there to be a constant factor increase.
+Therefore, it can be used to accurately benchmark our implementation and compare what it would
+look like if such.
+
+
+\appendix
+\section{General Notes}
+During work on this project, there were some notable realizations I came to about sparse matrix
+structure.
+
+Sparse matrices that I've looked at often do not distinguish between the indexing structure and
+the elements themselves. Most of the work in sparse matrices is done on creating a structure
+that specifies an efficient way to iterate through an array of elements. I have not seen a clear
+distinction made between the efficiency of the indexing structure and how one can effectively
+induce such a structure in a matrix. I think it might be productive to make such a distinction,
+as I found it to be the case that blending iteration and indexing with the actual values in the
+matrix lead to inefficiency, as one could insert the values in the matrix into the FST. In the
+end, I switched to just maintaining a pointer into a contiguous array of elements and that lead
+to a large performance gain because it meant in some cases I could mark elements as being ranges
+over contiguous blocks, leading to efficient iteration.
+
+\end{document}
