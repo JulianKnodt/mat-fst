@@ -136,7 +136,8 @@ i7-4770 CPU @ 3.4 GHz.
 
 We looked at matrices from
 \href{https://github.com/google-research/google-research/tree/master/state_of_sparsity}{Google's
-sparse matrix research}, using absolute thresholdin
+sparse matrix research}, using absolute thresholding in order to make the matrix sparse. Then,
+we stored the matrix using the CSR format and our format and compared the two's performance.
 
 We find that for similar input sizes, the cost in number of bytes for CSR and our proposed
 format are near equivalent. As demonstrated in Figure \ref{fig:sparsity}. While not showing any
@@ -153,6 +154,12 @@ cost is quite small this benefit might not be significant.}
 \end{figure}
 \end{center}
 
+For the runtime of sparse vector multiplication, we find ours to be a magnitude slower than the
+CSR implementation. We expect this to be mainly due to the fact that CSR naturally lends itself
+to efficient compiler vectorization optimizations, whereas the FST based data structure is
+harder to reason about for a compiler and thus misses out on those optimizations.
+
+A comprehensive report of statistics
 
 
 \section*{Results}
