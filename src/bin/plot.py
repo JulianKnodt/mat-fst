@@ -1,5 +1,7 @@
 #!/usr/local/bin/python3
 
+# To be used with load_mat.rs
+
 import matplotlib.pyplot as plt
 import numpy as np
 data = np.genfromtxt('sparsity.csv', delimiter=',')
